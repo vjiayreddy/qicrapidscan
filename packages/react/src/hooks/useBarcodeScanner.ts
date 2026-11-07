@@ -12,6 +12,8 @@ export interface UseBarcodeScannerOptions extends BarcodeScannerOptions {
   /** When true, start camera as soon as videoRef is attached and effect runs. */
   autoStart?: boolean;
   onResult?: (results: BarcodeResult[]) => void;
+  /** Continuous AR overlay updates (polygons). Empty array clears the overlay. */
+  onOverlay?: (results: BarcodeResult[]) => void;
   onError?: (error: Error) => void;
 }
 
@@ -27,6 +29,8 @@ export interface UseBarcodeScannerResult {
   getCameras: () => Promise<CameraDevice[]>;
   switchCamera: (deviceId: string) => Promise<void>;
   results: BarcodeResult[];
+  /** Latest AR overlay polygons for the live preview. */
+  overlayResults: BarcodeResult[];
   isScanning: boolean;
   error: Error | null;
   clearError: () => void;
@@ -34,7 +38,8 @@ export interface UseBarcodeScannerResult {
 }
 
 function optionsKey(options: UseBarcodeScannerOptions): string {
-  const { autoStart: _a, onResult: _r, onError: _e, ...rest } = options;
+  const { autoStart: _a, onResult: _r, onOverlay: _o, onError: _e, ...rest } =
+    options;
   return JSON.stringify(rest);
 }
 
@@ -51,6 +56,7 @@ export function useBarcodeScanner(
   optionsRef.current = options;
 
   const [results, setResults] = useState<BarcodeResult[]>([]);
+  const [overlayResults, setOverlayResults] = useState<BarcodeResult[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -58,9 +64,10 @@ export function useBarcodeScanner(
   const autoStart = options.autoStart ?? false;
 
   useEffect(() => {
-    const { autoStart: _ignored, onResult, onError, ...scannerOptions } =
+    const { autoStart: _ignored, onResult, onOverlay, onError, ...scannerOptions } =
       optionsRef.current;
     void onResult;
+    void onOverlay;
     void onError;
 
     const scanner = new BarcodeScanner(scannerOptions);
@@ -69,6 +76,10 @@ export function useBarcodeScanner(
     const offResult = scanner.on("result", (next) => {
       setResults((prev) => [...next, ...prev].slice(0, 50));
       optionsRef.current.onResult?.(next);
+    });
+    const offOverlay = scanner.on("overlay", (next) => {
+      setOverlayResults(next);
+      optionsRef.current.onOverlay?.(next);
     });
     const offError = scanner.on("error", (err) => {
       setError(err);
@@ -102,8 +113,10 @@ export function useBarcodeScanner(
     return () => {
       cancelled = true;
       offResult();
+      offOverlay();
       offError();
       setIsScanning(false);
+      setOverlayResults([]);
       void scanner.destroy();
       if (scannerRef.current === scanner) {
         scannerRef.current = null;
@@ -126,6 +139,7 @@ export function useBarcodeScanner(
     if (!scanner) return;
     await scanner.stop();
     setIsScanning(false);
+    setOverlayResults([]);
   }, []);
 
   const pause = useCallback(() => {
@@ -173,6 +187,7 @@ export function useBarcodeScanner(
     getCameras,
     switchCamera,
     results,
+    overlayResults,
     isScanning,
     error,
     clearError,

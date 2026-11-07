@@ -17,7 +17,7 @@ const scanner = new BarcodeScanner(options?);
 | `listCameras()` | Enumerate video input devices (permission-dependent) |
 | `switchCamera(deviceId)` | Switch active device while scanning |
 | `destroy()` | Full teardown; further use throws `SCANNER_DESTROYED` |
-| `on(event, handler)` / `off(...)` | Subscribe to `result` or `error` |
+| `on(event, handler)` / `off(...)` | Subscribe to `result`, `overlay` (AR polygons), or `error` |
 
 ### Options (high level)
 
@@ -49,8 +49,13 @@ Typed `Error` with `code: BarcodeErrorCode`. Empty scan results are **not** erro
 
 | Export | Role |
 |---|---|
-| `BarcodeScanner` | Video + lifecycle component |
-| `useBarcodeScanner` | Headless hook (`videoRef`, `start`, `stop`, results/error state) |
+| `BarcodeScanner` | Video + lifecycle component; optional `showGuide` / `showOverlay` |
+| `ScanGuide` | ROI viewfinder (corners + laser); UI guidance only |
+| `ScanOverlay` | AR overlay polygons from live `overlay` stream / `boundingBox` |
+| `useBarcodeScanner` | Headless hook (`videoRef`, `overlayResults`, `start`, `stop`, `scanImage`) |
 | `useCamera` | Lower-level camera helper |
+| `useElementSize` | ResizeObserver helper for overlay layout |
+
+Import guide styles once: `import "@qicrapidscan/react/styles.css"`.
 
 Peer dependencies: `react`, `react-dom` ≥ 18.

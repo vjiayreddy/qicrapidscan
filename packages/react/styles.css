@@ -1,0 +1,211 @@
+/* Scan guide (corners + laser) — aligned with DESIGN.md semantic tokens */
+
+:root {
+  --qic-color-ink: #171717;
+  --qic-color-on-dark: #ffffff;
+  --qic-color-success: #16a34a;
+  --qic-color-success-bright: #4ade80;
+  --qic-color-success-soft: rgba(22, 163, 74, 0.9);
+  --qic-color-success-glow: rgba(22, 163, 74, 0.85);
+  --qic-color-mask: rgba(0, 0, 0, 0.32);
+  --qic-color-mask-strong: rgba(0, 0, 0, 0.5);
+  --qic-color-mask-edit: rgba(0, 0, 0, 0.55);
+  --qic-radius-xs: 4px;
+  --qic-radius-md: 8px;
+  --qic-radius-lg: 10px;
+  --qic-radius-xl: 16px;
+  --qic-radius-pill: 9999px;
+  --qic-font-sans: Inter, -apple-system, system-ui, sans-serif;
+}
+
+.qic-guide {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.qic-guide--editing {
+  pointer-events: auto;
+  z-index: 6;
+}
+
+.qic-guide--frame {
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: var(--qic-radius-xl);
+  box-shadow: 0 0 0 9999px var(--qic-color-mask);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 14px;
+}
+
+.qic-guide__window {
+  position: absolute;
+  box-shadow: 0 0 0 9999px var(--qic-color-mask-strong);
+  border-radius: var(--qic-radius-xs);
+  touch-action: none;
+}
+
+.qic-guide--editing .qic-guide__window {
+  pointer-events: auto;
+  cursor: move;
+  box-shadow:
+    0 0 0 9999px var(--qic-color-mask-edit),
+    inset 0 0 0 1.5px var(--qic-color-success-soft);
+}
+
+.qic-guide__corner {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--qic-color-on-dark);
+  border-radius: var(--qic-radius-xs);
+  pointer-events: none;
+}
+
+.qic-guide__corner--tl {
+  top: 0;
+  left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: var(--qic-radius-lg);
+}
+
+.qic-guide__corner--tr {
+  top: 0;
+  right: 0;
+  border-left: 0;
+  border-bottom: 0;
+  border-top-right-radius: var(--qic-radius-lg);
+}
+
+.qic-guide__corner--bl {
+  bottom: 0;
+  left: 0;
+  border-right: 0;
+  border-top: 0;
+  border-bottom-left-radius: var(--qic-radius-lg);
+}
+
+.qic-guide__corner--br {
+  bottom: 0;
+  right: 0;
+  border-left: 0;
+  border-top: 0;
+  border-bottom-right-radius: var(--qic-radius-lg);
+}
+
+.qic-guide__handle {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--qic-color-ink);
+  border-radius: var(--qic-radius-pill);
+  background: var(--qic-color-success);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+  z-index: 2;
+  touch-action: none;
+  cursor: nwse-resize;
+}
+
+.qic-guide__handle--tl {
+  top: -11px;
+  left: -11px;
+  cursor: nwse-resize;
+}
+
+.qic-guide__handle--tr {
+  top: -11px;
+  right: -11px;
+  cursor: nesw-resize;
+}
+
+.qic-guide__handle--bl {
+  bottom: -11px;
+  left: -11px;
+  cursor: nesw-resize;
+}
+
+.qic-guide__handle--br {
+  bottom: -11px;
+  right: -11px;
+  cursor: nwse-resize;
+}
+
+.qic-guide__laser {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  height: 2px;
+  top: 8%;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--qic-color-success) 20%,
+    var(--qic-color-success-bright) 50%,
+    var(--qic-color-success) 80%,
+    transparent
+  );
+  box-shadow: 0 0 12px var(--qic-color-success-glow);
+  /* Promote to its own layer so decode work on the main thread jitters less. */
+  transform: translateZ(0);
+  will-change: top, opacity;
+  animation: qic-laser 2.2s ease-in-out infinite;
+  pointer-events: none;
+  backface-visibility: hidden;
+}
+
+@keyframes qic-laser {
+  0%,
+  100% {
+    top: 8%;
+    opacity: 0.55;
+  }
+  50% {
+    top: calc(100% - 8%);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qic-guide__laser {
+    animation: none;
+    top: 50%;
+    opacity: 0.85;
+  }
+}
+
+.qic-guide__label {
+  position: absolute;
+  left: 50%;
+  bottom: 10%;
+  transform: translateX(-50%);
+  z-index: 1;
+  margin: 0;
+  color: var(--qic-color-on-dark);
+  font: 500 13px/1.4 var(--qic-font-sans);
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  text-align: center;
+  padding: 0 16px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.qic-guide__edit-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 8px 12px;
+  border-radius: var(--qic-radius-pill);
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--qic-color-on-dark);
+  font: 500 12px/1.3 var(--qic-font-sans);
+  white-space: nowrap;
+  pointer-events: none;
+}

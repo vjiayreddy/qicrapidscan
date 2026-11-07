@@ -19,6 +19,8 @@ export interface DecodeRasterInput {
 export interface DecoderAdapter {
   readonly name: string;
   setFormats(formats: BarcodeFormat[]): void;
+  /** Optional — ZXing TRY_HARDER (slower, more thorough). */
+  setTryHarder?(value: boolean): void;
   decode(input: DecodeCanvasInput): BarcodeResult | null;
   decodeRaster?(input: DecodeRasterInput): BarcodeResult | null;
   destroy(): void;

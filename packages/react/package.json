@@ -13,15 +13,19 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
+    "./styles.css": "./styles.css",
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "styles.css",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "*.css"
+  ],
   "scripts": {
     "build": "rollup -c rollup.config.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
