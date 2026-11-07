@@ -18,6 +18,8 @@ export interface ResolvedScannerOptions {
     scanInterval: number;
     maxWidth: number;
     maxHeight: number;
+    tryHarder: boolean;
+    liveFormatBanding: boolean;
     useWorker: boolean;
   };
   duplicateFilter: {
@@ -66,15 +68,18 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
     detection: {
       multiple: options.detection?.multiple ?? false,
       maxResults: options.detection?.maxResults ?? 10,
-      maxRegions: options.detection?.maxRegions ?? 24,
-      maxDepth: options.detection?.maxDepth ?? 3,
+      // Keep multi-detect budgets modest — decode runs on the main thread today.
+      maxRegions: options.detection?.maxRegions ?? 8,
+      maxDepth: options.detection?.maxDepth ?? 2,
       overlap: options.detection?.overlap ?? 0.2,
-      maxTimeMs: options.detection?.maxTimeMs ?? 400,
+      maxTimeMs: options.detection?.maxTimeMs ?? 120,
     },
     performance: {
-      scanInterval: options.performance?.scanInterval ?? 100,
-      maxWidth: options.performance?.maxWidth ?? 1280,
-      maxHeight: options.performance?.maxHeight ?? 720,
+      scanInterval: options.performance?.scanInterval ?? 150,
+      maxWidth: options.performance?.maxWidth ?? 960,
+      maxHeight: options.performance?.maxHeight ?? 540,
+      tryHarder: options.performance?.tryHarder ?? false,
+      liveFormatBanding: options.performance?.liveFormatBanding ?? true,
       // Deferred — Phase 2 always main-thread.
       useWorker: false,
     },

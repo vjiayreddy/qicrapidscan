@@ -98,8 +98,10 @@ export class ZXingDecoder implements DecoderAdapter {
   readonly name = "zxing";
   private readonly reader = new MultiFormatReader();
   private formats: BarcodeFormat[] = [...DEFAULT_FORMATS];
+  private tryHarder = false;
 
-  constructor(formats?: BarcodeFormat[]) {
+  constructor(formats?: BarcodeFormat[], tryHarder = false) {
+    this.tryHarder = tryHarder;
     if (formats && formats.length > 0) {
       this.setFormats(formats);
     } else {
@@ -109,6 +111,11 @@ export class ZXingDecoder implements DecoderAdapter {
 
   setFormats(formats: BarcodeFormat[]): void {
     this.formats = formats.length > 0 ? [...formats] : [...DEFAULT_FORMATS];
+    this.applyHints();
+  }
+
+  setTryHarder(value: boolean): void {
+    this.tryHarder = value;
     this.applyHints();
   }
 
@@ -183,7 +190,7 @@ export class ZXingDecoder implements DecoderAdapter {
       DecodeHintType.POSSIBLE_FORMATS,
       this.formats.map((format) => TO_ZXING[format]),
     );
-    hints.set(DecodeHintType.TRY_HARDER, true);
+    hints.set(DecodeHintType.TRY_HARDER, this.tryHarder);
     this.reader.setHints(hints);
   }
 }
@@ -212,6 +219,9 @@ function toGreyscaleLuminance(
   return greyscale;
 }
 
-export function createDefaultDecoder(formats?: BarcodeFormat[]): DecoderAdapter {
-  return new ZXingDecoder(formats);
+export function createDefaultDecoder(
+  formats?: BarcodeFormat[],
+  tryHarder = false,
+): DecoderAdapter {
+  return new ZXingDecoder(formats, tryHarder);
 }

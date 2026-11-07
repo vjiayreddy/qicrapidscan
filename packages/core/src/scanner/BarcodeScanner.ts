@@ -1,5 +1,12 @@
 import { CameraManager } from "../camera/CameraManager.js";
 import type { DecoderAdapter } from "../decoder/DecoderAdapter.js";
+import { selectLiveFormatBand } from "../decoder/liveFormatBand.js";
+import {
+  ResultTracker,
+  toTrackedDecode,
+} from "../detection/ResultTracker.js";
+import { scaleResultsToSource } from "../detection/geometry.js";
+import { MultiBarcodeDetector } from "../detection/MultiBarcodeDetector.js";
 import { BarcodeError } from "../errors/BarcodeError.js";
 import { EventEmitter } from "../events/EventEmitter.js";
 import { DuplicateFilter } from "../processing/DuplicateFilter.js";
@@ -13,6 +20,8 @@ import { resolveOptions, type ResolvedScannerOptions } from "./validateOptions.j
 
 type ScannerEvents = {
   result: BarcodeResult[];
+  /** Continuous AR overlay polygons for the live camera (may be empty to clear). */
+  overlay: BarcodeResult[];
   error: BarcodeError;
 };
 
@@ -31,17 +40,21 @@ export class BarcodeScanner {
   private readonly events = new EventEmitter<ScannerEvents>();
   private readonly duplicateFilter: DuplicateFilter;
   private readonly frameProcessor: FrameProcessor;
+  private readonly tracker: ResultTracker;
   private readonly injectedDecoder?: DecoderAdapter;
   private readonly injectedCamera?: CameraManager;
 
   private decoder: DecoderAdapter | null = null;
   private camera: CameraManager | null = null;
   private imageScanner: ImageScanner | null = null;
+  private multiDetector: MultiBarcodeDetector | null = null;
   private video: HTMLVideoElement | null = null;
   private runtimeReady: Promise<void> | null = null;
   private destroyed = false;
   private scanning = false;
   private paused = false;
+  private lastOverlayCount = 0;
+  private liveFormatCursor = 0;
 
   constructor(options: BarcodeScannerOptions = {}, deps: BarcodeScannerDependencies = {}) {
     this.rawOptions = options;
@@ -53,6 +66,12 @@ export class BarcodeScanner {
       this.resolved.duplicateFilter.cooldown,
     );
     this.frameProcessor = new FrameProcessor(this.resolved.performance.scanInterval);
+    this.tracker = new ResultTracker({
+      dedupeWindowMs: this.resolved.duplicateFilter.cooldown,
+      confirmHits: 1,
+      missFrames: 4,
+      smooth: 0.22,
+    });
   }
 
   getOptions(): Readonly<BarcodeScannerOptions> {
@@ -73,6 +92,8 @@ export class BarcodeScanner {
       this.video = video;
       this.scanning = true;
       this.paused = false;
+      this.tracker.reset();
+      this.lastOverlayCount = 0;
       this.frameProcessor.start(video, () => this.processLiveFrame(video));
     } catch (error) {
       this.video = null;
@@ -112,9 +133,12 @@ export class BarcodeScanner {
     await this.ensureRuntime();
 
     try {
+      // Image scans always use the full configured format list (not live bands).
+      this.decoder!.setFormats(this.resolved.formats);
       const results = await this.imageScanner!.scan(source);
       if (results.length > 0) {
         this.events.emit("result", results);
+        this.events.emit("overlay", results);
       }
       return results;
     } catch (error) {
@@ -148,6 +172,8 @@ export class BarcodeScanner {
     this.frameProcessor.pause();
     try {
       await this.camera.switchCamera(deviceId);
+      this.tracker.reset();
+      this.lastOverlayCount = 0;
       if (!this.paused) {
         this.frameProcessor.start(this.video, () => this.processLiveFrame(this.video!));
       }
@@ -165,14 +191,20 @@ export class BarcodeScanner {
   }
 
   on(event: "result", callback: (results: BarcodeResult[]) => void): () => void;
+  on(event: "overlay", callback: (results: BarcodeResult[]) => void): () => void;
   on(event: "error", callback: (error: BarcodeError) => void): () => void;
   on(
-    event: "result" | "error",
-    callback: ((results: BarcodeResult[]) => void) | ((error: BarcodeError) => void),
+    event: "result" | "overlay" | "error",
+    callback:
+      | ((results: BarcodeResult[]) => void)
+      | ((error: BarcodeError) => void),
   ): () => void {
     this.assertAlive();
     if (event === "result") {
       return this.events.on("result", callback as (results: BarcodeResult[]) => void);
+    }
+    if (event === "overlay") {
+      return this.events.on("overlay", callback as (results: BarcodeResult[]) => void);
     }
     return this.events.on("error", callback as (error: BarcodeError) => void);
   }
@@ -182,10 +214,12 @@ export class BarcodeScanner {
     await this.stopInternal(true);
     this.events.clear();
     this.duplicateFilter.clear();
+    this.tracker.reset();
     this.decoder?.destroy();
     this.decoder = null;
     this.camera = null;
     this.imageScanner = null;
+    this.multiDetector = null;
     this.runtimeReady = null;
     this.destroyed = true;
   }
@@ -203,9 +237,13 @@ export class BarcodeScanner {
         this.decoder = this.injectedDecoder;
       } else {
         const { createDefaultDecoder } = await import("../decoder/ZXingDecoder.js");
-        this.decoder = createDefaultDecoder(this.resolved.formats);
+        this.decoder = createDefaultDecoder(
+          this.resolved.formats,
+          this.resolved.performance.tryHarder,
+        );
       }
       this.decoder.setFormats(this.resolved.formats);
+      this.decoder.setTryHarder?.(this.resolved.performance.tryHarder);
     }
     if (!this.camera) {
       this.camera = this.injectedCamera ?? new CameraManager();
@@ -215,6 +253,15 @@ export class BarcodeScanner {
       this.imageScanner = new ImageScanner(this.decoder, this.imageScannerOptions());
     } else {
       this.imageScanner.setOptions(this.imageScannerOptions());
+    }
+    if (this.resolved.detection.multiple) {
+      this.multiDetector = new MultiBarcodeDetector(this.decoder, {
+        maxResults: this.resolved.detection.maxResults,
+        maxRegions: this.resolved.detection.maxRegions,
+        maxDepth: this.resolved.detection.maxDepth,
+        overlap: this.resolved.detection.overlap,
+        maxTimeMs: this.resolved.detection.maxTimeMs,
+      });
     }
   }
 
@@ -237,6 +284,7 @@ export class BarcodeScanner {
     if (!this.scanning || this.paused || !this.decoder) return;
 
     let sized: ReturnType<typeof drawVideoFrame> | null = null;
+    const started = performance.now();
     try {
       sized = drawVideoFrame(
         video,
@@ -244,19 +292,26 @@ export class BarcodeScanner {
         this.resolved.performance.maxHeight,
       );
 
-      let results: BarcodeResult[] = [];
-      if (this.resolved.detection.multiple) {
-        const { MultiBarcodeDetector } = await import(
-          "../detection/MultiBarcodeDetector.js"
+      // Cap per-frame symbology count so 1D / 1D+2D stay near 2D-only cost.
+      if (this.resolved.performance.liveFormatBanding) {
+        const band = selectLiveFormatBand(
+          this.resolved.formats,
+          this.liveFormatCursor,
         );
-        const detector = new MultiBarcodeDetector(this.decoder, {
-          maxResults: this.resolved.detection.maxResults,
-          maxRegions: this.resolved.detection.maxRegions,
-          maxDepth: this.resolved.detection.maxDepth,
-          overlap: this.resolved.detection.overlap,
-          maxTimeMs: this.resolved.detection.maxTimeMs,
-        });
-        results = detector.detect(sized.canvas).results;
+        this.liveFormatCursor = band.nextCursor;
+        this.decoder.setFormats(band.formats);
+      }
+
+      let results: BarcodeResult[] = [];
+      if (this.resolved.detection.multiple && this.multiDetector) {
+        results = this.multiDetector.detect(sized.canvas).results;
+        results = scaleResultsToSource(
+          results,
+          sized.canvas.width,
+          sized.canvas.height,
+          sized.sourceWidth,
+          sized.sourceHeight,
+        );
       } else {
         const decoded = this.decoder.decode({
           canvas: sized.canvas,
@@ -266,10 +321,25 @@ export class BarcodeScanner {
         if (decoded) results = [decoded];
       }
 
-      if (results.length === 0) return;
-      const accepted = this.duplicateFilter.filter(results);
-      if (accepted.length > 0) {
-        this.events.emit("result", accepted);
+      const tracked = results
+        .map(toTrackedDecode)
+        .filter((item): item is NonNullable<typeof item> => item != null);
+
+      const tick = this.tracker.ingest(tracked);
+      const shouldEmitOverlay =
+        tick.overlay.length > 0 || this.lastOverlayCount > 0;
+
+      if (shouldEmitOverlay) {
+        this.lastOverlayCount = tick.overlay.length;
+        this.events.emit("overlay", tick.overlay);
+      }
+
+      if (tick.accepted.length > 0) {
+        // Keep DuplicateFilter as a secondary gate for result consumers.
+        const accepted = this.duplicateFilter.filter(tick.accepted);
+        if (accepted.length > 0) {
+          this.events.emit("result", accepted);
+        }
       }
     } catch (error) {
       if (error instanceof BarcodeError) {
@@ -285,7 +355,18 @@ export class BarcodeScanner {
       );
     } finally {
       sized?.cleanup();
+      this.adaptLiveInterval(performance.now() - started);
+      // Let the browser paint (laser / overlay) before the next decode.
+      await yieldToMain();
     }
+  }
+
+  private adaptLiveInterval(decodeMs: number): void {
+    const base = this.resolved.performance.scanInterval;
+    // If a frame overran the budget, back off so the UI can catch up.
+    const next =
+      decodeMs > 45 ? Math.max(base, Math.ceil(decodeMs * 1.5)) : base;
+    this.frameProcessor.setScanInterval(next);
   }
 
   private async stopInternal(clearDuplicates: boolean): Promise<void> {
@@ -293,6 +374,13 @@ export class BarcodeScanner {
     this.scanning = false;
     this.paused = false;
     this.video = null;
+    this.liveFormatCursor = 0;
+    this.frameProcessor.setScanInterval(this.resolved.performance.scanInterval);
+    if (this.lastOverlayCount > 0) {
+      this.lastOverlayCount = 0;
+      this.events.emit("overlay", []);
+    }
+    this.tracker.reset();
     if (clearDuplicates) {
       this.duplicateFilter.clear();
     }
@@ -306,4 +394,14 @@ export class BarcodeScanner {
       throw new BarcodeError("SCANNER_DESTROYED", "Scanner has been destroyed.");
     }
   }
+}
+
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
 }

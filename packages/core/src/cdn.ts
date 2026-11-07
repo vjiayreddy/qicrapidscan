@@ -7,6 +7,8 @@ export {
   BarcodeError,
   DEFAULT_FORMATS,
   ALL_SUPPORTED_FORMATS,
+  ONE_D_FORMATS,
+  TWO_D_FORMATS,
   createDefaultDecoder,
   MultiBarcodeDetector,
   detectMultipleFromRaster,
