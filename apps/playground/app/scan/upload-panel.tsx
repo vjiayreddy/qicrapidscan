@@ -32,6 +32,10 @@ type UploadPanelProps = {
   frameSize: { width: number; height: number };
   onFile: (file: File | null) => void;
   onClear: () => void;
+  /** Aria label for the header back control. */
+  backAriaLabel?: string;
+  /** Label for the secondary back button when a preview is shown. */
+  backButtonLabel?: string;
 };
 
 export function UploadPanel(props: UploadPanelProps) {
@@ -47,6 +51,8 @@ export function UploadPanel(props: UploadPanelProps) {
     frameSize,
     onFile,
     onClear,
+    backAriaLabel = "Back to live scan",
+    backButtonLabel = "Back to camera",
   } = props;
 
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -74,7 +80,7 @@ export function UploadPanel(props: UploadPanelProps) {
         <button
           type="button"
           className="pg-upload-panel__icon-btn"
-          aria-label="Back to live scan"
+          aria-label={backAriaLabel}
           onClick={onClose}
         >
           <ChevronLeftIcon />
@@ -209,7 +215,7 @@ export function UploadPanel(props: UploadPanelProps) {
                   className="pg-btn pg-btn--secondary"
                   onClick={onClose}
                 >
-                  Back to camera
+                  {backButtonLabel}
                 </button>
               </div>
             </div>

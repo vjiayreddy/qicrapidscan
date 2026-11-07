@@ -15,6 +15,11 @@ export interface UseBarcodeScannerOptions extends BarcodeScannerOptions {
   /** Continuous AR overlay updates (polygons). Empty array clears the overlay. */
   onOverlay?: (results: BarcodeResult[]) => void;
   onError?: (error: Error) => void;
+  /**
+   * Already-scanned `format:text` keys. Seeded into the duplicate filter without
+   * recreating the scanner (survives remounts when the parent keeps history).
+   */
+  seenKeys?: readonly string[];
 }
 
 export interface UseBarcodeScannerResult {
@@ -38,8 +43,14 @@ export interface UseBarcodeScannerResult {
 }
 
 function optionsKey(options: UseBarcodeScannerOptions): string {
-  const { autoStart: _a, onResult: _r, onOverlay: _o, onError: _e, ...rest } =
-    options;
+  const {
+    autoStart: _a,
+    onResult: _r,
+    onOverlay: _o,
+    onError: _e,
+    seenKeys: _s,
+    ...rest
+  } = options;
   return JSON.stringify(rest);
 }
 
@@ -62,15 +73,25 @@ export function useBarcodeScanner(
 
   const key = optionsKey(options);
   const autoStart = options.autoStart ?? false;
+  const seenKeys = options.seenKeys;
 
   useEffect(() => {
-    const { autoStart: _ignored, onResult, onOverlay, onError, ...scannerOptions } =
-      optionsRef.current;
+    const {
+      autoStart: _ignored,
+      onResult,
+      onOverlay,
+      onError,
+      seenKeys: initialSeen,
+      ...scannerOptions
+    } = optionsRef.current;
     void onResult;
     void onOverlay;
     void onError;
 
     const scanner = new BarcodeScanner(scannerOptions);
+    if (initialSeen?.length) {
+      scanner.seedSeen(initialSeen);
+    }
     scannerRef.current = scanner;
 
     const offResult = scanner.on("result", (next) => {
@@ -123,6 +144,11 @@ export function useBarcodeScanner(
       }
     };
   }, [key, autoStart]);
+
+  useEffect(() => {
+    if (!seenKeys?.length) return;
+    scannerRef.current?.seedSeen(seenKeys);
+  }, [seenKeys, key]);
 
   const start = useCallback(async () => {
     const scanner = scannerRef.current;

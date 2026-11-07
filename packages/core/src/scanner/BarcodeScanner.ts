@@ -10,6 +10,7 @@ import { MultiBarcodeDetector } from "../detection/MultiBarcodeDetector.js";
 import { BarcodeError } from "../errors/BarcodeError.js";
 import { EventEmitter } from "../events/EventEmitter.js";
 import { DuplicateFilter } from "../processing/DuplicateFilter.js";
+import { cropBarcodeFrame } from "../processing/cropBarcode.js";
 import { FrameProcessor } from "../processing/FrameProcessor.js";
 import { ImageScanner, type ImageSource } from "../processing/ImageScanner.js";
 import { drawVideoFrame } from "../processing/canvas.js";
@@ -64,14 +65,23 @@ export class BarcodeScanner {
     this.duplicateFilter = new DuplicateFilter(
       this.resolved.duplicateFilter.enabled,
       this.resolved.duplicateFilter.cooldown,
+      this.resolved.duplicateFilter.mode,
     );
     this.frameProcessor = new FrameProcessor(this.resolved.performance.scanInterval);
     this.tracker = new ResultTracker({
-      dedupeWindowMs: this.resolved.duplicateFilter.cooldown,
+      dedupeWindowMs:
+        this.resolved.duplicateFilter.mode === "once"
+          ? Number.POSITIVE_INFINITY
+          : this.resolved.duplicateFilter.cooldown,
       confirmHits: 1,
-      missFrames: 4,
-      smooth: 0.22,
+      missFrames: 6,
+      smooth: 0.28,
     });
+  }
+
+  /** Mark format:text values as already scanned (survives remount seeding). */
+  seedSeen(keys: Iterable<string>): void {
+    this.duplicateFilter.seed(keys);
   }
 
   getOptions(): Readonly<BarcodeScannerOptions> {
@@ -336,7 +346,13 @@ export class BarcodeScanner {
 
       if (tick.accepted.length > 0) {
         // Keep DuplicateFilter as a secondary gate for result consumers.
-        const accepted = this.duplicateFilter.filter(tick.accepted);
+        let accepted = this.duplicateFilter.filter(tick.accepted);
+        if (accepted.length > 0 && this.resolved.captureCrop) {
+          accepted = accepted.map((item) => {
+            const cropDataUrl = cropBarcodeFrame(video, item);
+            return cropDataUrl ? { ...item, cropDataUrl } : item;
+          });
+        }
         if (accepted.length > 0) {
           this.events.emit("result", accepted);
         }

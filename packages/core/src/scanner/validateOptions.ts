@@ -25,7 +25,9 @@ export interface ResolvedScannerOptions {
   duplicateFilter: {
     enabled: boolean;
     cooldown: number;
+    mode: "cooldown" | "once";
   };
+  captureCrop: boolean;
 }
 
 function assertPositiveNumber(name: string, value: number | undefined): void {
@@ -62,6 +64,14 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
     );
   }
 
+  const duplicateMode = options.duplicateFilter?.mode ?? "cooldown";
+  if (duplicateMode !== "cooldown" && duplicateMode !== "once") {
+    throw new BarcodeError(
+      "SCAN_FAILED",
+      'Invalid option "duplicateFilter.mode": expected "cooldown" or "once".',
+    );
+  }
+
   return {
     formats,
     camera: options.camera,
@@ -86,6 +96,8 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
     duplicateFilter: {
       enabled: options.duplicateFilter?.enabled ?? true,
       cooldown: options.duplicateFilter?.cooldown ?? 1500,
+      mode: duplicateMode,
     },
+    captureCrop: options.captureCrop ?? false,
   };
 }

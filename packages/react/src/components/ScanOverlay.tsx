@@ -15,15 +15,8 @@ export interface ScanOverlayProps {
   className?: string;
 }
 
-/** Prefer a stable 4-corner polygon for AR overlays (including 1D codes). */
+/** Prefer smoothed corner points; fall back to AABB only when points are missing. */
 function polygonPoints(result: BarcodeResult): string | null {
-  if (result.boundingBox) {
-    const { x, y, width, height } = result.boundingBox;
-    const x2 = x + width;
-    const y2 = y + height;
-    return `${x},${y} ${x2},${y} ${x2},${y2} ${x},${y2}`;
-  }
-
   if (result.points && result.points.length >= 3) {
     return result.points.map((point) => `${point.x},${point.y}`).join(" ");
   }
@@ -45,6 +38,13 @@ function polygonPoints(result: BarcodeResult): string | null {
     ].join(" ");
   }
 
+  if (result.boundingBox) {
+    const { x, y, width, height } = result.boundingBox;
+    const x2 = x + width;
+    const y2 = y + height;
+    return `${x},${y} ${x2},${y} ${x2},${y2} ${x},${y2}`;
+  }
+
   return null;
 }
 
@@ -55,7 +55,7 @@ export function ScanOverlay({
   sourceHeight,
   containerWidth,
   containerHeight,
-  objectFit = "contain",
+  objectFit = "cover",
   fill = "rgba(22,163,74,0.18)",
   stroke = "#16a34a",
   className,

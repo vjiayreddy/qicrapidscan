@@ -39,6 +39,17 @@ export interface BarcodeScannerOptions {
   };
   duplicateFilter?: {
     enabled?: boolean;
+    /** Cooldown window in ms when mode is "cooldown". Default 1500. */
     cooldown?: number;
+    /**
+     * "cooldown" — suppress the same format:text for `cooldown` ms.
+     * "once" — never re-emit the same format:text until clear/stop.
+     */
+    mode?: "cooldown" | "once";
   };
+  /**
+   * When true, live accepts include a JPEG `cropDataUrl` thumbnail of the
+   * barcode region. Default false.
+   */
+  captureCrop?: boolean;
 }

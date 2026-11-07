@@ -15,12 +15,22 @@ export {
 } from "./decoder/liveFormatBand.js";
 export { MultiBarcodeDetector } from "./detection/MultiBarcodeDetector.js";
 export { detectMultipleFromRaster } from "./detection/RasterMultiDetect.js";
-export { ResultTracker, toTrackedDecode } from "./detection/ResultTracker.js";
+export {
+  ResultTracker,
+  toTrackedDecode,
+  adaptiveSmooth,
+} from "./detection/ResultTracker.js";
 export type {
   TrackedDecode,
   TrackerOptions,
   TrackerTick,
 } from "./detection/ResultTracker.js";
+export { cropBarcodeFrame } from "./processing/cropBarcode.js";
+export type {
+  CropSource,
+  CropBarcodeOptions,
+} from "./processing/cropBarcode.js";
+export type { DuplicateFilterMode } from "./processing/DuplicateFilter.js";
 export {
   toCornerPoints,
   scaleResultsToSource,

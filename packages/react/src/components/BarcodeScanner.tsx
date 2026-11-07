@@ -26,6 +26,11 @@ export interface BarcodeScannerProps {
   detection?: BarcodeScannerOptions["detection"];
   /** Live-frame performance knobs (interval, downscale). */
   performance?: BarcodeScannerOptions["performance"];
+  duplicateFilter?: BarcodeScannerOptions["duplicateFilter"];
+  /** Attach JPEG crop thumbnails on accepted live results. */
+  captureCrop?: boolean;
+  /** Already-scanned `format:text` keys for session dedupe across remounts. */
+  seenKeys?: readonly string[];
   onResult?: (results: BarcodeResult[]) => void;
   onOverlay?: (results: BarcodeResult[]) => void;
   onError?: (error: Error) => void;
@@ -59,6 +64,9 @@ export function BarcodeScanner(props: BarcodeScannerProps) {
     autoStart = true,
     detection,
     performance,
+    duplicateFilter,
+    captureCrop = false,
+    seenKeys,
     onResult,
     onOverlay,
     onError,
@@ -95,6 +103,9 @@ export function BarcodeScanner(props: BarcodeScannerProps) {
     formats,
     detection: { multiple, ...detection },
     performance,
+    duplicateFilter,
+    captureCrop,
+    seenKeys,
     camera: { facingMode },
     autoStart,
     onResult,

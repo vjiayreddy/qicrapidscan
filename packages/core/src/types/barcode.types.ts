@@ -29,4 +29,6 @@ export interface BarcodeResult {
     y: number;
   }>;
   timestamp: number;
+  /** Optional cropped barcode thumbnail (data URL) when captureCrop is enabled. */
+  cropDataUrl?: string;
 }
