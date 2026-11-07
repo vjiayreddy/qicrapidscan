@@ -69,6 +69,7 @@ export function ScannerDemo() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [multiple, setMultiple] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
+  const [editRoi, setEditRoi] = useState(false);
   const [beepTone, setBeepTone] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
   const [barcodeTab, setBarcodeTab] = useState<BarcodeTab>("1d");
@@ -205,8 +206,9 @@ export function ScannerDemo() {
           autoStart
           showGuide={showGuide}
           showOverlay={showOverlay}
-          showLaser={showGuide}
+          showLaser={showGuide && !editRoi}
           roi={roi}
+          guideEditing={editRoi}
           onRoiChange={setRoi}
           guideLabel="Move the finder over a barcode"
           onResult={onLiveResult}
@@ -286,6 +288,11 @@ export function ScannerDemo() {
         onMultipleChange={setMultiple}
         showGuide={showGuide}
         onShowGuideChange={setShowGuide}
+        editRoi={editRoi}
+        onEditRoiChange={(value) => {
+          setEditRoi(value);
+          if (value) setDrawerOpen(false);
+        }}
         beepTone={beepTone}
         onBeepToneChange={setBeepTone}
         showOverlay={showOverlay}

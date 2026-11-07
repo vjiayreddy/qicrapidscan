@@ -28,6 +28,8 @@ type SettingsDrawerProps = {
   onMultipleChange: (value: boolean) => void;
   showGuide: boolean;
   onShowGuideChange: (value: boolean) => void;
+  editRoi: boolean;
+  onEditRoiChange: (value: boolean) => void;
   beepTone: boolean;
   onBeepToneChange: (value: boolean) => void;
   showOverlay: boolean;
@@ -49,6 +51,8 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
     onMultipleChange,
     showGuide,
     onShowGuideChange,
+    editRoi,
+    onEditRoiChange,
     beepTone,
     onBeepToneChange,
     showOverlay,
@@ -104,7 +108,19 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
               icon={<FinderIcon />}
               label="View Finder"
               checked={showGuide}
-              onChange={onShowGuideChange}
+              onChange={(value) => {
+                onShowGuideChange(value);
+                if (!value) onEditRoiChange(false);
+              }}
+            />
+            <ToggleRow
+              icon={<RoiIcon />}
+              label="Edit ROI"
+              checked={editRoi}
+              onChange={(value) => {
+                if (value) onShowGuideChange(true);
+                onEditRoiChange(value);
+              }}
             />
             <ToggleRow
               icon={<BeepIcon />}
@@ -295,6 +311,30 @@ function FinderIcon() {
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function RoiIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect
+        x="5"
+        y="6"
+        width="14"
+        height="12"
+        rx="1.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeDasharray="3 2.5"
+      />
+      <path
+        d="M8 10h3v3M16 14h-3v-3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
