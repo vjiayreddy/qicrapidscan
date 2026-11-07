@@ -1,0 +1,59 @@
+{
+  "generatedAt": "2026-11-07T06:56:02.638Z",
+  "note": "Informational Phase 6 metrics. Latency/memory gates require product-owner approval (PRD §20).",
+  "environment": {
+    "node": "v20.19.4",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "bundles": {
+    "index.js": {
+      "bytes": 50777,
+      "gzipBytes": 11301,
+      "path": "packages/core/dist/index.js"
+    },
+    "index.cjs": {
+      "bytes": 51015,
+      "gzipBytes": 11275,
+      "path": "packages/core/dist/index.cjs"
+    },
+    "qicrapidscan.esm.js": {
+      "bytes": 1313761,
+      "gzipBytes": 244132,
+      "path": "packages/core/dist/qicrapidscan.esm.js"
+    },
+    "qicrapidscan.js": {
+      "bytes": 1435687,
+      "gzipBytes": 250716,
+      "path": "packages/core/dist/qicrapidscan.js"
+    },
+    "qicrapidscan.min.js": {
+      "bytes": 411934,
+      "gzipBytes": 109712,
+      "path": "packages/core/dist/qicrapidscan.min.js"
+    }
+  },
+  "singleQrDecodeRaster": {
+    "samples": 15,
+    "decodedOk": 20,
+    "p50Ms": 1.0140830000000278,
+    "p95Ms": 3.5505410000000097,
+    "maxMs": 3.5505410000000097
+  },
+  "createDestroyCycles": {
+    "iterations": 50,
+    "heapDeltaBytes": 135200,
+    "note": "Node heapUsed delta only; not a browser memory proof"
+  },
+  "multiFixture": {
+    "n": 4,
+    "p50Ms": 14.996290999999985,
+    "p95Ms": 40.510249999999985,
+    "maxMs": 40.510249999999985
+  },
+  "proposals": {
+    "singleP95Ms": 100,
+    "multiP95Ms": 250,
+    "cdnMinGzipKb": 350
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "multi-4",
+  "image": "multi-4.png",
+  "groundTruth": [
+    {
+      "text": "QR-A-001",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 28,
+        "y": 28,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-B-002",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 148,
+        "y": 28,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-C-003",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 28,
+        "y": 148,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-D-004",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 148,
+        "y": 148,
+        "width": 96,
+        "height": 96
+      }
+    }
+  ]
+}

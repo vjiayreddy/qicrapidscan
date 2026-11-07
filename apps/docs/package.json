@@ -1,0 +1,12 @@
+{
+  "name": "@qicrapidscan/docs-placeholder",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Docs live under apps/playground/app/docs for Phase 4",
+  "scripts": {
+    "build": "node -e \"console.log('docs placeholder')\"",
+    "typecheck": "node -e \"console.log('docs placeholder')\"",
+    "lint": "node -e \"console.log('docs placeholder')\"",
+    "test": "node -e \"console.log('docs placeholder')\""
+  }
+}

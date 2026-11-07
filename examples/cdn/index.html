@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QicRapidScan CDN IIFE example</title>
+  </head>
+  <body>
+    <h1>CDN IIFE</h1>
+    <p>
+      Serve the monorepo (or copy <code>packages/core/dist/qicrapidscan.min.js</code>) and open this
+      page. For local testing:
+    </p>
+    <pre>pnpm --filter @qicrapidscan/core build
+npx serve examples/cdn -p 5179</pre>
+    <video id="preview" muted playsinline style="width: 100%; max-width: 480px; background: #111"></video>
+    <div>
+      <button id="start">Start</button>
+      <button id="stop">Stop</button>
+    </div>
+    <pre id="out"></pre>
+
+    <!-- Relative path works when serving from repo with dist linked; for demo use absolute file path via local server root -->
+    <script src="../../packages/core/dist/qicrapidscan.min.js"></script>
+    <script>
+      const out = document.getElementById("out");
+      const video = document.getElementById("preview");
+      if (!window.QicRapidScan) {
+        out.textContent = "QicRapidScan global missing — build core first.";
+      } else {
+        const scanner = new QicRapidScan.BarcodeScanner({
+          formats: ["QR_CODE", "EAN_13", "CODE_128"],
+          detection: { multiple: true },
+        });
+        scanner.on("result", (results) => {
+          out.textContent = results.map((r) => r.format + ": " + r.text).join("\\n");
+        });
+        scanner.on("error", (error) => {
+          out.textContent = "Error: " + error.message;
+        });
+        document.getElementById("start").onclick = () => scanner.start(video);
+        document.getElementById("stop").onclick = () => scanner.stop();
+      }
+    </script>
+  </body>
+</html>

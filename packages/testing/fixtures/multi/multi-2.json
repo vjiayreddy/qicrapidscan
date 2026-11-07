@@ -1,0 +1,26 @@
+{
+  "id": "multi-2",
+  "image": "multi-2.png",
+  "groundTruth": [
+    {
+      "text": "QR-A-001",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 28,
+        "y": 28,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-B-002",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 148,
+        "y": 28,
+        "width": 96,
+        "height": 96
+      }
+    }
+  ]
+}

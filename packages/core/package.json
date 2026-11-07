@@ -1,0 +1,52 @@
+{
+  "name": "@qicrapidscan/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "QicRapidScan framework-independent barcode scanning core",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/qicrapidscan.min.js",
+  "jsdelivr": "./dist/qicrapidscan.min.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./cdn": {
+      "import": "./dist/qicrapidscan.esm.js",
+      "default": "./dist/qicrapidscan.esm.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rollup -c rollup.config.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src --max-warnings=0",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "happy-dom": "^21.0.4",
+    "rollup": "^4.35.0",
+    "rollup-plugin-dts": "^6.1.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9"
+  },
+  "dependencies": {
+    "@zxing/library": "0.21.3"
+  }
+}

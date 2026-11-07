@@ -1,0 +1,16 @@
+export { BarcodeScanner } from "./scanner/BarcodeScanner.js";
+export type { BarcodeScannerDependencies } from "./scanner/BarcodeScanner.js";
+export { BarcodeError } from "./errors/index.js";
+export type { BarcodeErrorCode } from "./errors/index.js";
+export { DEFAULT_FORMATS, ALL_SUPPORTED_FORMATS } from "./decoder/formats.js";
+export { createDefaultDecoder } from "./decoder/ZXingDecoder.js";
+export { MultiBarcodeDetector } from "./detection/MultiBarcodeDetector.js";
+export { detectMultipleFromRaster } from "./detection/RasterMultiDetect.js";
+export type { MultiDetectLimits, MultiDetectStats } from "./detection/types.js";
+export type {
+  BarcodeFormat,
+  BarcodeResult,
+  BarcodeScannerOptions,
+  CameraDevice,
+  MultiDetectionOptions,
+} from "./types/index.js";

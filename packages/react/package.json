@@ -1,0 +1,56 @@
+{
+  "name": "@qicrapidscan/react",
+  "version": "0.0.0",
+  "private": true,
+  "description": "QicRapidScan React bindings",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rollup -c rollup.config.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src --max-warnings=0",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "dependencies": {
+    "@qicrapidscan/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "happy-dom": "^21.0.4",
+    "jsdom": "^31.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rollup": "^4.35.0",
+    "rollup-plugin-dts": "^6.1.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9"
+  }
+}

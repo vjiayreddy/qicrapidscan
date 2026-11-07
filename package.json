@@ -1,0 +1,48 @@
+{
+  "name": "qicrapidscan",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QicRapidScan — client-side web barcode scanning SDK",
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "corpus:multi": "node scripts/generate-multi-corpus.mjs",
+    "benchmark:multi": "pnpm --filter @qicrapidscan/core build && node scripts/benchmark-multi.mjs",
+    "benchmark:perf": "pnpm --filter @qicrapidscan/core build && node scripts/benchmark-perf.mjs",
+    "playground": "pnpm --filter @qicrapidscan/playground dev",
+    "playground:build": "pnpm --filter @qicrapidscan/core build && pnpm --filter @qicrapidscan/react build && pnpm --filter @qicrapidscan/playground build",
+    "verify:packages": "pnpm --filter @qicrapidscan/core build && pnpm --filter @qicrapidscan/react build && node scripts/verify-packages.mjs",
+    "pack:verify": "pnpm verify:packages && node scripts/pack-verify.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "cdn:smoke": "pnpm --filter @qicrapidscan/core build && node scripts/cdn-smoke.mjs",
+    "ssr:smoke": "pnpm --filter @qicrapidscan/core build && pnpm --filter @qicrapidscan/react build && node scripts/ssr-smoke.mjs",
+    "check:licenses": "node scripts/check-licenses.mjs",
+    "verify:phase6": "node scripts/phase6-verify.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/node": "^22.13.10",
+    "@types/pngjs": "^6.0.5",
+    "@types/qrcode": "^1.5.6",
+    "eslint": "^9.22.0",
+    "globals": "^16.0.0",
+    "happy-dom": "^21.0.4",
+    "pngjs": "^7.0.0",
+    "prettier": "^3.5.3",
+    "qrcode": "^1.5.4",
+    "turbo": "^2.4.4",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1",
+    "vitest": "^3.0.9"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "id": "multi-9",
+  "image": "multi-9.png",
+  "groundTruth": [
+    {
+      "text": "QR-N-001",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 28,
+        "y": 28,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-002",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 148,
+        "y": 28,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-003",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 268,
+        "y": 28,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-004",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 28,
+        "y": 148,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-005",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 148,
+        "y": 148,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-006",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 268,
+        "y": 148,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-007",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 28,
+        "y": 268,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-008",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 148,
+        "y": 268,
+        "width": 96,
+        "height": 96
+      }
+    },
+    {
+      "text": "QR-N-009",
+      "format": "QR_CODE",
+      "boundingBox": {
+        "x": 268,
+        "y": 268,
+        "width": 96,
+        "height": 96
+      }
+    }
+  ]
+}

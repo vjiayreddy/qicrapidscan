@@ -1,0 +1,23 @@
+{
+  "name": "@qicrapidscan/example-vue",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "node -e \"console.log('example-vue: skip lint')\"",
+    "test": "node -e \"console.log('example-vue: skip test')\""
+  },
+  "dependencies": {
+    "@qicrapidscan/core": "workspace:*",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2",
+    "vue-tsc": "^2.2.8"
+  }
+}

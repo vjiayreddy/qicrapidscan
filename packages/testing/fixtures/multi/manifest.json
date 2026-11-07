@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "id": "multi-2",
+      "image": "multi-2.png",
+      "count": 2
+    },
+    {
+      "id": "multi-4",
+      "image": "multi-4.png",
+      "count": 4
+    },
+    {
+      "id": "multi-6",
+      "image": "multi-6.png",
+      "count": 6
+    },
+    {
+      "id": "multi-9",
+      "image": "multi-9.png",
+      "count": 9
+    }
+  ]
+}
