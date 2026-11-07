@@ -12,3 +12,4 @@ coverage
 !.env.example
 tmp
 *.tgz
+DESIGN.md

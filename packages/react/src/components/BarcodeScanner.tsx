@@ -144,7 +144,7 @@ export function BarcodeScanner(props: BarcodeScannerProps) {
           width: "100%",
           maxWidth: "100%",
           height: "100%",
-          background: "#111",
+          background: "#171717",
           display: "block",
           objectFit,
           ...videoStyle,

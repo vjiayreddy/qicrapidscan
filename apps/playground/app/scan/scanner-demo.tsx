@@ -1,27 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BarcodeResult } from "@qicrapidscan/core";
-import {
-  ALL_SUPPORTED_FORMATS,
-  ONE_D_FORMATS,
-  TWO_D_FORMATS,
-} from "@qicrapidscan/core";
+import Link from "next/link";
+import type { BarcodeFormat, BarcodeResult } from "@qicrapidscan/core";
+import { ALL_SUPPORTED_FORMATS } from "@qicrapidscan/core";
 import {
   BarcodeScanner,
-  DEFAULT_ROI,
-  ScanGuide,
-  ScanOverlay,
   useBarcodeScanner,
   useElementSize,
   type RoiRect,
 } from "@qicrapidscan/react";
 import "@qicrapidscan/react/styles.css";
+import { SettingsDrawer, type BarcodeTab } from "./settings-drawer";
+import { UploadPanel } from "./upload-panel";
 
-type DemoMode = "component" | "hook" | "upload";
-type FormatMode = "all" | "1d" | "2d";
+type FacingMode = "user" | "environment";
 
-/** Live camera: single-decode + modest downscale; core also bands formats ≤4/frame. */
 const LIVE_PERFORMANCE = {
   scanInterval: 150,
   maxWidth: 800,
@@ -30,7 +24,6 @@ const LIVE_PERFORMANCE = {
   liveFormatBanding: true,
 } as const;
 
-/** Image upload can afford a fuller multi-detect budget (one-shot). */
 const UPLOAD_DETECTION = {
   multiple: true,
   maxResults: 10,
@@ -39,83 +32,110 @@ const UPLOAD_DETECTION = {
   maxTimeMs: 400,
 } as const;
 
-function formatsFor(mode: FormatMode) {
-  if (mode === "1d") return [...ONE_D_FORMATS];
-  if (mode === "2d") return [...TWO_D_FORMATS];
-  return [...ALL_SUPPORTED_FORMATS];
+const FINDER_ROI: RoiRect = {
+  left: 12,
+  top: 22,
+  width: 76,
+  height: 48,
+};
+
+function playBeep() {
+  try {
+    const Ctx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.value = 0.08;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+    osc.stop(ctx.currentTime + 0.13);
+    window.setTimeout(() => void ctx.close(), 200);
+  } catch {
+    // Audio may be blocked; ignore.
+  }
 }
 
 export function ScannerDemo() {
-  const [mode, setMode] = useState<DemoMode>("component");
-  const [formatMode, setFormatMode] = useState<FormatMode>("all");
-  const [log, setLog] = useState<BarcodeResult[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [roi, setRoi] = useState<RoiRect>(DEFAULT_ROI);
-  const [editingRoi, setEditingRoi] = useState(false);
+  const [facingMode, setFacingMode] = useState<FacingMode>("environment");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [multiple, setMultiple] = useState(false);
+  const [showGuide, setShowGuide] = useState(true);
+  const [beepTone, setBeepTone] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [barcodeTab, setBarcodeTab] = useState<BarcodeTab>("1d");
+  const [showAllFormats, setShowAllFormats] = useState(false);
+  const [enabledFormats, setEnabledFormats] = useState(
+    () => new Set<BarcodeFormat>(ALL_SUPPORTED_FORMATS),
+  );
+  const [latest, setLatest] = useState<BarcodeResult | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [roi, setRoi] = useState<RoiRect>(FINDER_ROI);
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
   const [uploadResults, setUploadResults] = useState<BarcodeResult[]>([]);
   const [uploadSize, setUploadSize] = useState({ width: 0, height: 0 });
-  const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
 
-  const formats = useMemo(() => formatsFor(formatMode), [formatMode]);
-  const hookFrameRef = useRef<HTMLDivElement | null>(null);
+  const formats = useMemo(() => {
+    const selected = ALL_SUPPORTED_FORMATS.filter((f) => enabledFormats.has(f));
+    return selected.length > 0 ? selected : [...ALL_SUPPORTED_FORMATS];
+  }, [enabledFormats]);
+
+  const formatsKey = formats.join(",");
   const uploadFrameRef = useRef<HTMLDivElement | null>(null);
-  const hookFrameSize = useElementSize(hookFrameRef);
   const uploadFrameSize = useElementSize(uploadFrameRef);
+  const beepRef = useRef(beepTone);
+  beepRef.current = beepTone;
 
-  const appendLog = useCallback((results: BarcodeResult[]) => {
-    setLog((prev) => [...results, ...prev].slice(0, 20));
+  const onLiveResult = useCallback((results: BarcodeResult[]) => {
+    if (results.length === 0) return;
+    if (beepRef.current) playBeep();
+    setLatest(results[0] ?? null);
   }, []);
-
-  const live = useBarcodeScanner({
-    formats,
-    // Single full-frame decode — multi-region tiling is too heavy for live 1D/1D+2D.
-    detection: { multiple: false },
-    performance: { ...LIVE_PERFORMANCE },
-    autoStart: false,
-    onResult: appendLog,
-    onError: (err) => setError(err.message),
-  });
 
   const upload = useBarcodeScanner({
     formats,
     detection: { ...UPLOAD_DETECTION },
     performance: { maxWidth: 1280, maxHeight: 720 },
     autoStart: false,
-    onResult: appendLog,
-    onError: (err) => setError(err.message),
+    onError: (err) => setUploadError(err.message),
   });
 
   useEffect(() => {
     setUploadResults([]);
-  }, [formatMode]);
+  }, [formatsKey]);
 
   useEffect(() => {
-    const video = live.videoRef.current;
-    if (!video) return;
-    const sync = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        setVideoSize((prev) =>
-          prev.width === video.videoWidth && prev.height === video.videoHeight
-            ? prev
-            : { width: video.videoWidth, height: video.videoHeight },
-        );
-      }
-    };
-    sync();
-    video.addEventListener("loadedmetadata", sync);
-    video.addEventListener("playing", sync);
-    return () => {
-      video.removeEventListener("loadedmetadata", sync);
-      video.removeEventListener("playing", sync);
-    };
-  }, [live.videoRef, live.isScanning]);
+    if (!latest) return;
+    const id = window.setTimeout(() => setLatest(null), 3200);
+    return () => window.clearTimeout(id);
+  }, [latest]);
+
+  const clearUpload = useCallback(() => {
+    setUploadPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setUploadResults([]);
+    setUploadSize({ width: 0, height: 0 });
+    setUploadError(null);
+    setUploadBusy(false);
+  }, []);
 
   const onUploadFile = useCallback(
     async (file: File | null) => {
       if (!file) return;
-      setError(null);
+      setUploadError(null);
       setUploadResults([]);
+      setUploadBusy(true);
 
       const url = URL.createObjectURL(file);
       setUploadPreview((prev) => {
@@ -131,8 +151,11 @@ export function ScannerDemo() {
         });
         const results = await upload.scanImage(img);
         setUploadResults(results);
+        if (results.length > 0 && beepRef.current) playBeep();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setUploadError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setUploadBusy(false);
       }
     },
     [upload],
@@ -144,185 +167,151 @@ export function ScannerDemo() {
     };
   }, [uploadPreview]);
 
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" onClick={() => setMode("component")}>
-          Component API
-        </button>
-        <button type="button" onClick={() => setMode("hook")}>
-          Hook API
-        </button>
-        <button type="button" onClick={() => setMode("upload")}>
-          Image upload
-        </button>
-      </div>
+  const flipCamera = () => {
+    setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
+  };
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ color: "#555", fontSize: 14 }}>Formats:</span>
-        <button type="button" onClick={() => setFormatMode("all")}>
-          1D + 2D
-        </button>
-        <button type="button" onClick={() => setFormatMode("1d")}>
-          1D only
-        </button>
-        <button type="button" onClick={() => setFormatMode("2d")}>
-          2D only
-        </button>
-        {mode === "component" || mode === "hook" ? (
-          <button type="button" onClick={() => setEditingRoi((v) => !v)}>
-            {editingRoi ? "Done editing ROI" : "Edit ROI"}
-          </button>
+  const toggleFormat = (format: BarcodeFormat) => {
+    setEnabledFormats((prev) => {
+      const next = new Set(prev);
+      if (next.has(format)) next.delete(format);
+      else next.add(format);
+      return next;
+    });
+  };
+
+  const enableAll = (list: readonly BarcodeFormat[], enabled: boolean) => {
+    setEnabledFormats((prev) => {
+      const next = new Set(prev);
+      for (const format of list) {
+        if (enabled) next.add(format);
+        else next.delete(format);
+      }
+      return next;
+    });
+  };
+
+  const overlayOpen = drawerOpen || uploadOpen;
+
+  return (
+    <div className="pg-scan-hud">
+      <div className="pg-scan-hud__stage">
+        <BarcodeScanner
+          key={`live-${formatsKey}-${facingMode}-${multiple}`}
+          formats={formats}
+          facingMode={facingMode}
+          multiple={multiple}
+          performance={{ ...LIVE_PERFORMANCE }}
+          autoStart
+          showGuide={showGuide}
+          showOverlay={showOverlay}
+          showLaser={showGuide}
+          roi={roi}
+          onRoiChange={setRoi}
+          guideLabel="Move the finder over a barcode"
+          onResult={onLiveResult}
+          onError={(err) => setLiveError(err.message)}
+          className="pg-scan-hud__scanner"
+          style={{ width: "100%", height: "100%", background: "#0a0a0a" }}
+          videoStyle={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+
+        <div className="pg-scan-hud__chrome" aria-hidden={overlayOpen}>
+          <header className="pg-scan-hud__top">
+            <Link
+              href="/"
+              className="pg-scan-hud__icon-btn"
+              aria-label="Back to home"
+            >
+              <HomeIcon />
+            </Link>
+            <div className="pg-scan-hud__top-right">
+              <button
+                type="button"
+                className="pg-scan-hud__icon-btn"
+                aria-label="Flip camera"
+                onClick={flipCamera}
+              >
+                <FlipCameraIcon />
+              </button>
+              <button
+                type="button"
+                className="pg-scan-hud__icon-btn"
+                aria-label="Open settings"
+                aria-expanded={drawerOpen}
+                onClick={() => setDrawerOpen(true)}
+              >
+                <SettingsIcon />
+              </button>
+            </div>
+          </header>
+
+          <Link href="/docs" className="pg-scan-hud__sdk-pill">
+            Try the SDK in your project ↗
+          </Link>
+
+          <div className="pg-scan-hud__bottom">
+            <button
+              type="button"
+              className="pg-scan-hud__upload-btn"
+              onClick={() => {
+                setDrawerOpen(false);
+                setUploadOpen(true);
+              }}
+            >
+              <GalleryIcon />
+              <span>Upload image</span>
+            </button>
+          </div>
+        </div>
+
+        {latest && !overlayOpen ? (
+          <div className="pg-scan-hud__toast" role="status">
+            <span className="pg-scan-hud__toast-format">{latest.format}</span>
+            <span className="pg-scan-hud__toast-text">{latest.text}</span>
+          </div>
+        ) : null}
+
+        {liveError && !overlayOpen ? (
+          <p className="pg-scan-hud__error" role="alert">
+            {liveError}
+          </p>
         ) : null}
       </div>
 
-      {mode === "component" ? (
-        <BarcodeScanner
-          key={`component-${formatMode}`}
-          formats={formats}
-          multiple={false}
-          performance={{ ...LIVE_PERFORMANCE }}
-          autoStart
-          showGuide
-          showOverlay
-          roi={roi}
-          guideEditing={editingRoi}
-          onRoiChange={setRoi}
-          onResult={appendLog}
-          onError={(err) => setError(err.message)}
-          style={{ borderRadius: 8, overflow: "hidden", aspectRatio: "4 / 3" }}
-          videoStyle={{ aspectRatio: "4 / 3", objectFit: "cover" }}
-        />
-      ) : null}
+      <SettingsDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        multiple={multiple}
+        onMultipleChange={setMultiple}
+        showGuide={showGuide}
+        onShowGuideChange={setShowGuide}
+        beepTone={beepTone}
+        onBeepToneChange={setBeepTone}
+        showOverlay={showOverlay}
+        onShowOverlayChange={setShowOverlay}
+        barcodeTab={barcodeTab}
+        onBarcodeTabChange={setBarcodeTab}
+        enabledFormats={enabledFormats}
+        onToggleFormat={toggleFormat}
+        onEnableAll={enableAll}
+        showAllFormats={showAllFormats}
+        onShowAllFormatsChange={setShowAllFormats}
+      />
 
-      {mode === "hook" ? (
-        <div style={{ display: "grid", gap: 8 }}>
-          <div
-            ref={hookFrameRef}
-            style={{
-              position: "relative",
-              overflow: "hidden",
-              borderRadius: 8,
-              aspectRatio: "4 / 3",
-              background: "#111",
-            }}
-          >
-            <video
-              ref={live.videoRef}
-              muted
-              playsInline
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                display: "block",
-              }}
-            />
-            <ScanGuide
-              roi={roi}
-              editing={editingRoi}
-              onRoiChange={setRoi}
-            />
-            <ScanOverlay
-              results={live.overlayResults}
-              sourceWidth={videoSize.width}
-              sourceHeight={videoSize.height}
-              containerWidth={hookFrameSize.width}
-              containerHeight={hookFrameSize.height}
-              objectFit="cover"
-            />
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={() => void live.start()}>
-              Start
-            </button>
-            <button type="button" onClick={() => void live.stop()}>
-              Stop
-            </button>
-            <button type="button" onClick={() => live.pause()}>
-              Pause
-            </button>
-            <button type="button" onClick={() => live.resume()}>
-              Resume
-            </button>
-          </div>
-          <p style={{ margin: 0, color: "#666" }}>
-            Scanning: {live.isScanning ? "yes" : "no"}
-          </p>
-        </div>
-      ) : null}
-
-      {mode === "upload" ? (
-        <div style={{ display: "grid", gap: 8 }}>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(event) => {
-              void onUploadFile(event.target.files?.[0] ?? null);
-            }}
-          />
-          <div
-            ref={uploadFrameRef}
-            style={{
-              position: "relative",
-              overflow: "hidden",
-              borderRadius: 8,
-              background: "#111",
-              minHeight: 200,
-            }}
-          >
-            {uploadPreview ? (
-              <img
-                src={uploadPreview}
-                alt="Upload preview"
-                style={{
-                  display: "block",
-                  width: "100%",
-                  height: "auto",
-                  objectFit: "contain",
-                }}
-              />
-            ) : (
-              <p style={{ color: "#aaa", padding: 24, margin: 0 }}>
-                Choose an image with 1D or 2D barcodes.
-              </p>
-            )}
-            <ScanOverlay
-              results={uploadResults}
-              sourceWidth={uploadSize.width}
-              sourceHeight={uploadSize.height}
-              containerWidth={uploadFrameSize.width}
-              containerHeight={uploadFrameSize.height}
-              objectFit="contain"
-            />
-          </div>
-          {uploadResults.length > 0 ? (
-            <p style={{ margin: 0, color: "#007d48" }}>
-              Found {uploadResults.length} barcode
-              {uploadResults.length === 1 ? "" : "s"} in image.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {error ? (
-        <p style={{ color: "#b00020", margin: 0 }}>Error: {error}</p>
-      ) : null}
-
-      <section>
-        <h2 style={{ fontSize: 18 }}>Results</h2>
-        {log.length === 0 ? (
-          <p style={{ color: "#777" }}>No barcodes yet.</p>
-        ) : (
-          <ol>
-            {log.map((item, index) => (
-              <li key={`${item.id}-${item.timestamp}-${index}`}>
-                <strong>{item.format}</strong>: {item.text}
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <UploadPanel
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        busy={uploadBusy}
+        error={uploadError}
+        previewUrl={uploadPreview}
+        results={uploadResults}
+        sourceSize={uploadSize}
+        frameRef={uploadFrameRef}
+        frameSize={uploadFrameSize}
+        onFile={(file) => void onUploadFile(file)}
+        onClear={clearUpload}
+      />
     </div>
   );
 }
@@ -334,4 +323,80 @@ function loadImage(url: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("Failed to load image."));
     img.src = url;
   });
+}
+
+function HomeIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FlipCameraIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M9 4h6l1.5 2H20a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3.5L9 4Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 9.5a3.5 3.5 0 1 1-2.8 5.6"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8.5 12.5 9.8 9.8 12.5 11"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 8h11M15 8a2 2 0 1 0 4 0 2 2 0 0 0-4 0ZM4 16h7M11 16a2 2 0 1 0 4 0 2 2 0 0 0-4 0Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function GalleryIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect
+        x="3"
+        y="5"
+        width="18"
+        height="14"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.75"
+      />
+      <circle cx="9" cy="10" r="1.5" fill="currentColor" />
+      <path
+        d="M5 16l4-4 3 3 3-4 4 5"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }

@@ -56,8 +56,8 @@ export function ScanOverlay({
   containerWidth,
   containerHeight,
   objectFit = "contain",
-  fill = "rgba(34,197,94,0.18)",
-  stroke = "#22c55e",
+  fill = "rgba(22,163,74,0.18)",
+  stroke = "#16a34a",
   className,
 }: ScanOverlayProps) {
   const fitted = objectFitRect(
