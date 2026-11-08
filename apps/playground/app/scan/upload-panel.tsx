@@ -2,8 +2,6 @@
 
 import { useCallback, useRef, useState, type DragEvent } from "react";
 import type { BarcodeFormat, BarcodeResult } from "@qicrapidscan/core";
-import { ScanOverlay } from "@qicrapidscan/react";
-import type { Ref } from "react";
 
 const FORMAT_LABELS: Partial<Record<BarcodeFormat, string>> = {
   EAN_8: "EAN-8",
@@ -14,6 +12,7 @@ const FORMAT_LABELS: Partial<Record<BarcodeFormat, string>> = {
   CODE_39: "Code 39",
   CODE_93: "Code 93",
   ITF: "ITF",
+  CODABAR: "Codabar",
   QR_CODE: "QR Code",
   DATA_MATRIX: "Data Matrix",
   PDF_417: "PDF417",
@@ -26,16 +25,15 @@ type UploadPanelProps = {
   busy: boolean;
   error: string | null;
   previewUrl: string | null;
+  /** Annotated result image (source + baked orange landmarks). Preferred when set. */
+  resultImageUrl?: string | null;
   results: BarcodeResult[];
-  sourceSize: { width: number; height: number };
-  frameRef: Ref<HTMLDivElement>;
-  frameSize: { width: number; height: number };
   onFile: (file: File | null) => void;
   onClear: () => void;
-  /** Aria label for the header back control. */
   backAriaLabel?: string;
-  /** Label for the secondary back button when a preview is shown. */
   backButtonLabel?: string;
+  /** Opens the same Settings side drawer used by live camera. */
+  onOpenSettings?: () => void;
 };
 
 export function UploadPanel(props: UploadPanelProps) {
@@ -45,15 +43,16 @@ export function UploadPanel(props: UploadPanelProps) {
     busy,
     error,
     previewUrl,
+    resultImageUrl = null,
     results,
-    sourceSize,
-    frameRef,
-    frameSize,
     onFile,
     onClear,
     backAriaLabel = "Back to live scan",
     backButtonLabel = "Back to camera",
+    onOpenSettings,
   } = props;
+
+  const displayUrl = resultImageUrl || previewUrl;
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -91,17 +90,27 @@ export function UploadPanel(props: UploadPanelProps) {
             Decode barcodes from a photo — no camera needed
           </p>
         </div>
-        {previewUrl ? (
-          <button
-            type="button"
-            className="pg-upload-panel__text-btn"
-            onClick={onClear}
-          >
-            Clear
-          </button>
-        ) : (
-          <span className="pg-upload-panel__header-spacer" />
-        )}
+        <div className="pg-upload-panel__header-actions">
+          {onOpenSettings ? (
+            <button
+              type="button"
+              className="pg-upload-panel__icon-btn"
+              aria-label="Open settings"
+              onClick={onOpenSettings}
+            >
+              <SettingsIcon />
+            </button>
+          ) : null}
+          {previewUrl ? (
+            <button
+              type="button"
+              className="pg-upload-panel__text-btn"
+              onClick={onClear}
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <div className="pg-upload-panel__body">
@@ -138,7 +147,8 @@ export function UploadPanel(props: UploadPanelProps) {
             </span>
             <h3 className="pg-upload-drop__title">Drop an image here</h3>
             <p className="pg-upload-drop__hint">
-              PNG, JPG, or WebP with one or more barcodes
+              PNG, JPG, or WebP with one or more barcodes. Use Settings to
+              choose 1D / 2D formats.
             </p>
             <button
               type="button"
@@ -150,20 +160,16 @@ export function UploadPanel(props: UploadPanelProps) {
           </div>
         ) : (
           <div className="pg-upload-result">
-            <div ref={frameRef} className="pg-upload-result__frame">
+            <div className="pg-upload-result__frame">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={previewUrl}
-                alt="Uploaded barcode image"
+                src={displayUrl!}
+                alt={
+                  resultImageUrl
+                    ? "Scan result with detected barcodes marked"
+                    : "Uploaded barcode image"
+                }
                 className="pg-upload-result__img"
-              />
-              <ScanOverlay
-                results={results}
-                sourceWidth={sourceSize.width}
-                sourceHeight={sourceSize.height}
-                containerWidth={frameSize.width}
-                containerHeight={frameSize.height}
-                objectFit="contain"
               />
               {busy ? (
                 <div className="pg-upload-result__busy">Scanning…</div>
@@ -171,13 +177,11 @@ export function UploadPanel(props: UploadPanelProps) {
             </div>
 
             <div className="pg-upload-result__meta">
-              {busy ? (
-                <p className="pg-muted">Reading barcodes…</p>
-              ) : results.length > 0 ? (
+              {!busy && results.length > 0 ? (
                 <>
                   <p className="pg-upload-result__count">
-                    Found {results.length} barcode
-                    {results.length === 1 ? "" : "s"}
+                    {results.length} barcode{results.length === 1 ? "" : "s"}{" "}
+                    found
                   </p>
                   <ul className="pg-upload-result__list">
                     {results.map((item, index) => (
@@ -185,22 +189,37 @@ export function UploadPanel(props: UploadPanelProps) {
                         key={`${item.id}-${item.timestamp}-${index}`}
                         className="pg-upload-result__item"
                       >
-                        <span className="pg-upload-result__format">
-                          {FORMAT_LABELS[item.format] ?? item.format}
-                        </span>
-                        <span className="pg-upload-result__text">
-                          {item.text}
-                        </span>
+                        <div className="pg-upload-result__thumb" aria-hidden>
+                          {item.cropDataUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={item.cropDataUrl} alt="" />
+                          ) : (
+                            <span className="pg-upload-result__thumb-fallback">
+                              {index + 1}
+                            </span>
+                          )}
+                        </div>
+                        <div className="pg-upload-result__body">
+                          <span className="pg-upload-result__format">
+                            {FORMAT_LABELS[item.format] ?? item.format}
+                            <span className="pg-upload-result__index">
+                              #{index + 1}
+                            </span>
+                          </span>
+                          <span className="pg-upload-result__text">
+                            {item.text}
+                          </span>
+                        </div>
                       </li>
                     ))}
                   </ul>
                 </>
-              ) : (
+              ) : !busy ? (
                 <p className="pg-muted">
-                  No barcodes detected in this image. Try another photo or a
-                  sharper crop.
+                  No barcodes detected for the selected formats. Open Settings
+                  to enable 1D / 2D types, then try again.
                 </p>
-              )}
+              ) : null}
 
               <div className="pg-btn-row" style={{ marginTop: 16 }}>
                 <button
@@ -265,6 +284,19 @@ function ImageIcon() {
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 8h11M15 8a2 2 0 1 0 4 0 2 2 0 0 0-4 0ZM4 16h7M11 16a2 2 0 1 0 4 0 2 2 0 0 0-4 0Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
       />
     </svg>
   );

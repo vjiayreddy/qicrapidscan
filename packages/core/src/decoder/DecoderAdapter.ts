@@ -19,9 +19,17 @@ export interface DecodeRasterInput {
 export interface DecoderAdapter {
   readonly name: string;
   setFormats(formats: BarcodeFormat[]): void;
-  /** Optional — ZXing TRY_HARDER (slower, more thorough). */
+  /** Optional — thorough decode (engine-dependent). */
   setTryHarder?(value: boolean): void;
-  decode(input: DecodeCanvasInput): BarcodeResult | null;
-  decodeRaster?(input: DecodeRasterInput): BarcodeResult | null;
+  /** Optional — inverted luminance attempts (engine-dependent). */
+  setAlsoInverted?(value: boolean): void;
+  /** Decode at most one barcode from a canvas. */
+  decode(input: DecodeCanvasInput): Promise<BarcodeResult | null>;
+  /**
+   * Decode every barcode the engine can find in one pass.
+   * Preferred for still-image multi-detect (zxing-wasm / barcode-detector).
+   */
+  decodeAll?(input: DecodeCanvasInput): Promise<BarcodeResult[]>;
+  decodeRaster?(input: DecodeRasterInput): Promise<BarcodeResult | null>;
   destroy(): void;
 }

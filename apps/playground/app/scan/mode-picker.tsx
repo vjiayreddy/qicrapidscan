@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-export type DemoMode = "1d" | "2d" | "image";
+export type DemoMode = "1d" | "2d" | "image" | "image-1d" | "image-2d";
 
 type ModePickerProps = {
   onSelect: (mode: DemoMode) => void;
@@ -49,7 +49,17 @@ export function ModePicker({ onSelect }: ModePickerProps) {
           </h2>
           <div className="pg-mode-picker__card">
             <ModeRow
-              label="Scan from Image"
+              label="1D from Image"
+              icon={<Barcode1dIcon />}
+              onClick={() => onSelect("image-1d")}
+            />
+            <ModeRow
+              label="2D from Image"
+              icon={<Barcode2dIcon />}
+              onClick={() => onSelect("image-2d")}
+            />
+            <ModeRow
+              label="All formats from Image"
               icon={<ImageScanIcon />}
               onClick={() => onSelect("image")}
               last
@@ -57,7 +67,7 @@ export function ModePicker({ onSelect }: ModePickerProps) {
           </div>
           <p className="pg-mode-picker__disclaimer">
             Imported images are processed solely to detect barcodes and are not
-            stored or shared.
+            stored or shared. You can refine formats anytime in Settings.
           </p>
         </section>
 

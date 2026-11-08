@@ -12,6 +12,7 @@ Formats exposed by `@qicrapidscan/core` (via the ZXing adapter). For now only **
 | `CODE_39` | 1D | yes |
 | `CODE_93` | 1D | yes |
 | `ITF` | 1D | yes |
+| `CODABAR` | 1D | yes |
 | `QR_CODE` | 2D | yes |
 | `DATA_MATRIX` | 2D | yes |
 | `PDF_417` | 2D | yes |
@@ -38,6 +39,8 @@ For **live camera**, prefer `detection.multiple: false` and a modest
 tiling is expensive on the main thread when many 1D formats are enabled —
 use `multiple: true` mainly for image upload / offline scans.
 
-Live sessions also **band formats** (≤4 per frame, rotating the rest) and keep
-ZXing `TRY_HARDER` off by default so 1D / 1D+2D cost stays close to 2D-only.
-Image upload still uses the full format list.
+Live sessions also **band formats** (≤4 per frame, rotating the rest) so
+1D / 1D+2D cost stays close to 2D-only even with `TRY_HARDER` on by default.
+Image upload still uses the full format list plus multi-scale / enhance /
+rotation fallbacks (`performance.multiScale`, `imageEnhancement`,
+`rotationRetry`).

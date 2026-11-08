@@ -11,20 +11,20 @@ function blankRaster(width = 120, height = 120) {
 }
 
 describe("detectMultipleFromRaster (Phase 3)", () => {
-  it("respects maxRegions bound", () => {
+  it("respects maxRegions bound", async () => {
     let calls = 0;
     const decoder: DecoderAdapter = {
       name: "mock",
       setFormats: vi.fn(),
-      decode: () => null,
-      decodeRaster: () => {
+      decode: async () => null,
+      decodeRaster: async () => {
         calls += 1;
         return null;
       },
       destroy: vi.fn(),
     };
 
-    const outcome = detectMultipleFromRaster(decoder, blankRaster(), {
+    const outcome = await detectMultipleFromRaster(decoder, blankRaster(), {
       maxResults: 5,
       maxRegions: 3,
       maxDepth: 2,
@@ -36,14 +36,14 @@ describe("detectMultipleFromRaster (Phase 3)", () => {
     expect(calls).toBeLessThanOrEqual(3);
   });
 
-  it("collects multiple distinct codes from a scripted decoder", () => {
+  it("collects multiple distinct codes from a scripted decoder", async () => {
     const payloads = ["A", "B", "C"];
     let i = 0;
     const decoder: DecoderAdapter = {
       name: "mock",
       setFormats: vi.fn(),
-      decode: () => null,
-      decodeRaster: () => {
+      decode: async () => null,
+      decodeRaster: async () => {
         const text = payloads[i];
         if (!text) return null;
         i += 1;
@@ -64,7 +64,7 @@ describe("detectMultipleFromRaster (Phase 3)", () => {
       destroy: vi.fn(),
     };
 
-    const outcome = detectMultipleFromRaster(decoder, blankRaster(200, 200), {
+    const outcome = await detectMultipleFromRaster(decoder, blankRaster(200, 200), {
       maxResults: 10,
       maxRegions: 8,
       maxDepth: 2,
@@ -76,13 +76,13 @@ describe("detectMultipleFromRaster (Phase 3)", () => {
     expect(new Set(outcome.results.map((r) => r.text)).has("A")).toBe(true);
   });
 
-  it("stops at maxResults", () => {
+  it("stops at maxResults", async () => {
     let n = 0;
     const decoder: DecoderAdapter = {
       name: "mock",
       setFormats: vi.fn(),
-      decode: () => null,
-      decodeRaster: () => {
+      decode: async () => null,
+      decodeRaster: async () => {
         n += 1;
         const text = `T${n}`;
         return {
@@ -96,7 +96,7 @@ describe("detectMultipleFromRaster (Phase 3)", () => {
       destroy: vi.fn(),
     };
 
-    const outcome = detectMultipleFromRaster(decoder, blankRaster(240, 240), {
+    const outcome = await detectMultipleFromRaster(decoder, blankRaster(240, 240), {
       maxResults: 2,
       maxRegions: 20,
       maxDepth: 2,

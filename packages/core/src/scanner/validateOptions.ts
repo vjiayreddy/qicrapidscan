@@ -19,7 +19,14 @@ export interface ResolvedScannerOptions {
     maxWidth: number;
     maxHeight: number;
     tryHarder: boolean;
+    alsoInverted: boolean;
+    multiScale: boolean;
+    rotationRetry: boolean;
+    imageEnhancement: boolean;
     liveFormatBanding: boolean;
+    liveZoom: boolean;
+    liveZoomCropRatio: number;
+    liveZoomScale: number;
     useWorker: boolean;
   };
   duplicateFilter: {
@@ -52,6 +59,8 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
   assertPositiveNumber("performance.scanInterval", options.performance?.scanInterval);
   assertPositiveNumber("performance.maxWidth", options.performance?.maxWidth);
   assertPositiveNumber("performance.maxHeight", options.performance?.maxHeight);
+  assertPositiveNumber("performance.liveZoomCropRatio", options.performance?.liveZoomCropRatio);
+  assertPositiveNumber("performance.liveZoomScale", options.performance?.liveZoomScale);
   assertPositiveNumber("duplicateFilter.cooldown", options.duplicateFilter?.cooldown);
 
   if (
@@ -61,6 +70,27 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
     throw new BarcodeError(
       "SCAN_FAILED",
       'Invalid option "detection.overlap": expected a value in [0, 1).',
+    );
+  }
+
+  if (
+    options.performance?.liveZoomCropRatio !== undefined &&
+    (options.performance.liveZoomCropRatio < 0.25 ||
+      options.performance.liveZoomCropRatio > 1)
+  ) {
+    throw new BarcodeError(
+      "SCAN_FAILED",
+      'Invalid option "performance.liveZoomCropRatio": expected a value in [0.25, 1].',
+    );
+  }
+
+  if (
+    options.performance?.liveZoomScale !== undefined &&
+    options.performance.liveZoomScale < 1
+  ) {
+    throw new BarcodeError(
+      "SCAN_FAILED",
+      'Invalid option "performance.liveZoomScale": expected a value >= 1.',
     );
   }
 
@@ -82,14 +112,22 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
       maxRegions: options.detection?.maxRegions ?? 8,
       maxDepth: options.detection?.maxDepth ?? 2,
       overlap: options.detection?.overlap ?? 0.2,
-      maxTimeMs: options.detection?.maxTimeMs ?? 120,
+      // Allow enough time for tile passes after the full-frame decode.
+      maxTimeMs: options.detection?.maxTimeMs ?? 250,
     },
     performance: {
       scanInterval: options.performance?.scanInterval ?? 150,
-      maxWidth: options.performance?.maxWidth ?? 960,
-      maxHeight: options.performance?.maxHeight ?? 540,
-      tryHarder: options.performance?.tryHarder ?? false,
+      maxWidth: options.performance?.maxWidth ?? 1280,
+      maxHeight: options.performance?.maxHeight ?? 720,
+      tryHarder: options.performance?.tryHarder ?? true,
+      alsoInverted: options.performance?.alsoInverted ?? true,
+      multiScale: options.performance?.multiScale ?? true,
+      rotationRetry: options.performance?.rotationRetry ?? true,
+      imageEnhancement: options.performance?.imageEnhancement ?? true,
       liveFormatBanding: options.performance?.liveFormatBanding ?? true,
+      liveZoom: options.performance?.liveZoom ?? true,
+      liveZoomCropRatio: options.performance?.liveZoomCropRatio ?? 0.55,
+      liveZoomScale: options.performance?.liveZoomScale ?? 2,
       // Deferred — Phase 2 always main-thread.
       useWorker: false,
     },

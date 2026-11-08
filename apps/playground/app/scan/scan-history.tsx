@@ -11,6 +11,7 @@ const FORMAT_LABELS: Partial<Record<BarcodeFormat, string>> = {
   CODE_39: "Code 39",
   CODE_93: "Code 93",
   ITF: "ITF",
+  CODABAR: "Codabar",
   QR_CODE: "QR Code",
   DATA_MATRIX: "Data Matrix",
   PDF_417: "PDF417",

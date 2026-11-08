@@ -8,6 +8,7 @@ export type BarcodeFormat =
   | "CODE_39"
   | "CODE_93"
   | "ITF"
+  | "CODABAR"
   | "QR_CODE"
   | "DATA_MATRIX"
   | "PDF_417"

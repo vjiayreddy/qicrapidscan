@@ -118,7 +118,7 @@ All framework integrations must call the same core API. The core package owns ca
                               |
                     ZXing Decoder Adapter
                               |
-                 @zxing/library / compatible
+                 barcode-detector (zxing-wasm) / compatible
                   ZXing JavaScript dependency
 ```
 

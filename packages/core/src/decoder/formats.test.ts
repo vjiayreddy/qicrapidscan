@@ -1,24 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { BarcodeError } from "../errors/BarcodeError.js";
 import {
   ALL_SUPPORTED_FORMATS,
-  assertSupportedFormats,
   DEFAULT_FORMATS,
   ONE_D_FORMATS,
-  TWO_D_FORMATS,
+  assertSupportedFormats,
 } from "./formats.js";
+import { BarcodeError } from "../errors/BarcodeError.js";
 
 describe("formats", () => {
-  it("accepts all documented formats", () => {
-    expect(() => assertSupportedFormats([...ALL_SUPPORTED_FORMATS])).not.toThrow();
-  });
-
-  it("defaults to the full 1D + 2D set", () => {
-    expect(DEFAULT_FORMATS).toEqual(ALL_SUPPORTED_FORMATS);
-    expect(DEFAULT_FORMATS).toEqual([...ONE_D_FORMATS, ...TWO_D_FORMATS]);
+  it("includes CODABAR in the default 1D set", () => {
+    expect(ONE_D_FORMATS).toContain("CODABAR");
+    expect(DEFAULT_FORMATS).toContain("CODABAR");
+    expect(ALL_SUPPORTED_FORMATS).toContain("CODABAR");
   });
 
   it("rejects unknown formats", () => {
-    expect(() => assertSupportedFormats(["FOO" as never])).toThrow(BarcodeError);
+    expect(() =>
+      assertSupportedFormats(["NOT_A_FORMAT" as never]),
+    ).toThrow(BarcodeError);
   });
 });

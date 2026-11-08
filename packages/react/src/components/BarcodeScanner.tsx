@@ -21,6 +21,8 @@ export interface BarcodeScannerProps {
   formats?: BarcodeFormat[];
   multiple?: boolean;
   facingMode?: "user" | "environment";
+  /** Camera constraints (merged with `facingMode`). */
+  camera?: BarcodeScannerOptions["camera"];
   autoStart?: boolean;
   /** Extra detection limits (merged with `multiple`). */
   detection?: BarcodeScannerOptions["detection"];
@@ -61,6 +63,7 @@ export function BarcodeScanner(props: BarcodeScannerProps) {
     formats,
     multiple = false,
     facingMode = "environment",
+    camera,
     autoStart = true,
     detection,
     performance,
@@ -106,7 +109,7 @@ export function BarcodeScanner(props: BarcodeScannerProps) {
     duplicateFilter,
     captureCrop,
     seenKeys,
-    camera: { facingMode },
+    camera: { ...camera, facingMode: camera?.facingMode ?? facingMode },
     autoStart,
     onResult,
     onOverlay,

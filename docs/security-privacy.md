@@ -20,7 +20,7 @@
 | Remote exfiltration | None in SDK code paths reviewed |
 | Eval / dynamic script injection | None |
 | Secrets in repo | No API keys or credentials required |
-| Dependency surface | Primary runtime decode dep is `@zxing/library@0.21.3` (pinned) |
+| Dependency surface | Primary runtime decode dep is `barcode-detector` (zxing-wasm) |
 | XSS via results | Results are plain strings/bytes; apps must escape when rendering into HTML |
 | Reverse engineering | Minified CDN builds are not a security boundary |
 
@@ -29,6 +29,7 @@
 | Component | License | Action |
 |---|---|---|
 | QicRapidScan packages | Proprietary / unpublished (see root `LICENSE`) | Publish license TBD before public release |
-| `@zxing/library` | Apache-2.0 | Attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md); include in npm/CDN distributions |
+| `barcode-detector` | MIT | Attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) |
+| `zxing-wasm` | Apache-2.0 | Attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md); WASM fetched at runtime |
 
 Commercial licensing and package ownership remain an open product-owner decision ([open-decisions.md](./open-decisions.md)).
