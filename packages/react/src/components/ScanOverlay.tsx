@@ -13,17 +13,17 @@ export interface ScanOverlayProps {
   fill?: string;
   stroke?: string;
   className?: string;
+  /**
+   * Draw L-shaped corner landmarks + index badges (better on dense still images).
+   * Default true.
+   */
+  showLandmarks?: boolean;
+  /** Show 1-based index badges on each detection. Default follows showLandmarks. */
+  showIndices?: boolean;
 }
 
-/** Prefer a stable 4-corner polygon for AR overlays (including 1D codes). */
+/** Prefer smoothed corner points; fall back to AABB only when points are missing. */
 function polygonPoints(result: BarcodeResult): string | null {
-  if (result.boundingBox) {
-    const { x, y, width, height } = result.boundingBox;
-    const x2 = x + width;
-    const y2 = y + height;
-    return `${x},${y} ${x2},${y} ${x2},${y2} ${x},${y2}`;
-  }
-
   if (result.points && result.points.length >= 3) {
     return result.points.map((point) => `${point.x},${point.y}`).join(" ");
   }
@@ -45,20 +45,47 @@ function polygonPoints(result: BarcodeResult): string | null {
     ].join(" ");
   }
 
+  if (result.boundingBox) {
+    const { x, y, width, height } = result.boundingBox;
+    const x2 = x + width;
+    const y2 = y + height;
+    return `${x},${y} ${x2},${y} ${x2},${y2} ${x},${y2}`;
+  }
+
   return null;
 }
 
-/** SVG polygons mapped from barcode geometry into the fitted media box. */
+function cornerPoints(
+  result: BarcodeResult,
+): Array<{ x: number; y: number }> | null {
+  if (result.points && result.points.length >= 3) {
+    return result.points.slice(0, 4).map((p) => ({ x: p.x, y: p.y }));
+  }
+  if (result.boundingBox) {
+    const { x, y, width, height } = result.boundingBox;
+    return [
+      { x, y },
+      { x: x + width, y },
+      { x: x + width, y: y + height },
+      { x, y: y + height },
+    ];
+  }
+  return null;
+}
+
+/** SVG polygons / landmarks mapped from barcode geometry into the fitted media box. */
 export function ScanOverlay({
   results,
   sourceWidth,
   sourceHeight,
   containerWidth,
   containerHeight,
-  objectFit = "contain",
-  fill = "rgba(22,163,74,0.18)",
-  stroke = "#16a34a",
+  objectFit = "cover",
+  fill = "rgba(249,115,22,0.22)",
+  stroke = "#f97316",
   className,
+  showLandmarks = true,
+  showIndices,
 }: ScanOverlayProps) {
   const fitted = objectFitRect(
     containerWidth,
@@ -72,7 +99,12 @@ export function ScanOverlay({
     return null;
   }
 
-  const strokeWidth = Math.max(2, Math.min(sourceWidth, sourceHeight) / 180);
+  const minSide = Math.min(sourceWidth, sourceHeight);
+  const strokeWidth = Math.max(3, minSide / 220);
+  const landmarkLen = Math.max(10, minSide / 55);
+  const landmarkStroke = Math.max(4, minSide / 160);
+  const badgeR = Math.max(10, minSide / 70);
+  const withIndices = showIndices ?? showLandmarks;
 
   return (
     <svg
@@ -90,20 +122,86 @@ export function ScanOverlay({
       preserveAspectRatio="none"
       aria-hidden="true"
     >
-      {results.map((result) => {
+      {results.map((result, index) => {
         const points = polygonPoints(result);
-        if (!points) return null;
+        const corners = cornerPoints(result);
+        if (!points && !corners) return null;
+        const key = `${result.id}-${index}`;
+
         return (
-          <polygon
-            key={result.id}
-            points={points}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={strokeWidth}
-            strokeLinejoin="round"
-          />
+          <g key={key}>
+            {points ? (
+              <polygon
+                points={points}
+                fill={fill}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                strokeLinejoin="round"
+              />
+            ) : null}
+
+            {showLandmarks && corners && corners.length >= 4
+              ? corners.map((corner, i) => {
+                  const prev = corners[(i + corners.length - 1) % corners.length]!;
+                  const next = corners[(i + 1) % corners.length]!;
+                  const toPrev = unitToward(corner, prev);
+                  const toNext = unitToward(corner, next);
+                  const a = {
+                    x: corner.x + toPrev.x * landmarkLen,
+                    y: corner.y + toPrev.y * landmarkLen,
+                  };
+                  const b = {
+                    x: corner.x + toNext.x * landmarkLen,
+                    y: corner.y + toNext.y * landmarkLen,
+                  };
+                  return (
+                    <path
+                      key={`${key}-c${i}`}
+                      d={`M ${a.x} ${a.y} L ${corner.x} ${corner.y} L ${b.x} ${b.y}`}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth={landmarkStroke}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  );
+                })
+              : null}
+
+            {withIndices && corners && corners.length > 0 ? (
+              <g>
+                <circle
+                  cx={corners[0]!.x}
+                  cy={corners[0]!.y}
+                  r={badgeR}
+                  fill={stroke}
+                />
+                <text
+                  x={corners[0]!.x}
+                  y={corners[0]!.y}
+                  fill="#fff"
+                  fontSize={badgeR * 1.1}
+                  fontWeight={700}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                >
+                  {index + 1}
+                </text>
+              </g>
+            ) : null}
+          </g>
         );
       })}
     </svg>
   );
+}
+
+function unitToward(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): { x: number; y: number } {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
 }

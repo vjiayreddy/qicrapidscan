@@ -8,6 +8,7 @@ export type BarcodeFormat =
   | "CODE_39"
   | "CODE_93"
   | "ITF"
+  | "CODABAR"
   | "QR_CODE"
   | "DATA_MATRIX"
   | "PDF_417"
@@ -29,4 +30,6 @@ export interface BarcodeResult {
     y: number;
   }>;
   timestamp: number;
+  /** Optional cropped barcode thumbnail (data URL) when captureCrop is enabled. */
+  cropDataUrl?: string;
 }

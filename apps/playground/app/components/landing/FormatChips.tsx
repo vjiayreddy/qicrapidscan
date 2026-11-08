@@ -8,6 +8,7 @@ const FORMATS = [
   "CODE_39",
   "CODE_93",
   "ITF",
+  "CODABAR",
   "DATA_MATRIX",
   "PDF_417",
   "AZTEC",

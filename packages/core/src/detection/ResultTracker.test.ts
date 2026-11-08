@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ResultTracker, toTrackedDecode } from "./ResultTracker.js";
+import {
+  ResultTracker,
+  adaptiveSmooth,
+  toTrackedDecode,
+} from "./ResultTracker.js";
 import type { BarcodeResult } from "../types/barcode.types.js";
 
 function result(
@@ -72,5 +76,50 @@ describe("ResultTracker", () => {
       ]),
     );
     expect(tracked?.cornerPoints).toHaveLength(4);
+  });
+
+  it("adaptiveSmooth stays low for tiny motion and rises for large motion", () => {
+    const still = [
+      { x: 0, y: 0 },
+      { x: 40, y: 0 },
+      { x: 40, y: 40 },
+      { x: 0, y: 40 },
+    ];
+    const jitter = still.map((point) => ({ x: point.x + 1, y: point.y + 1 }));
+    const jumped = still.map((point) => ({ x: point.x + 30, y: point.y + 20 }));
+
+    const quiet = adaptiveSmooth(still, jitter, 0.28);
+    const fast = adaptiveSmooth(still, jumped, 0.28);
+    expect(quiet).toBeLessThan(fast);
+    expect(quiet).toBeGreaterThanOrEqual(0.12);
+    expect(fast).toBeLessThanOrEqual(0.62);
+  });
+
+  it("once-style Infinity dedupe window never re-accepts", () => {
+    const tracker = new ResultTracker({
+      dedupeWindowMs: Number.POSITIVE_INFINITY,
+      confirmHits: 1,
+      missFrames: 2,
+      smooth: 0.5,
+    });
+
+    const corners = [
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 20 },
+      { x: 0, y: 20 },
+    ];
+
+    expect(
+      tracker.ingest([toTrackedDecode(result("once", corners, 1))!]).accepted,
+    ).toHaveLength(1);
+
+    // Drop track, then see the same value again far in the future.
+    tracker.ingest([]);
+    tracker.ingest([]);
+    expect(
+      tracker.ingest([toTrackedDecode(result("once", corners, 99_999))!])
+        .accepted,
+    ).toHaveLength(0);
   });
 });

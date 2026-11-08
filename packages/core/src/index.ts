@@ -15,12 +15,59 @@ export {
 } from "./decoder/liveFormatBand.js";
 export { MultiBarcodeDetector } from "./detection/MultiBarcodeDetector.js";
 export { detectMultipleFromRaster } from "./detection/RasterMultiDetect.js";
-export { ResultTracker, toTrackedDecode } from "./detection/ResultTracker.js";
+export {
+  ResultTracker,
+  toTrackedDecode,
+  adaptiveSmooth,
+} from "./detection/ResultTracker.js";
 export type {
   TrackedDecode,
   TrackerOptions,
   TrackerTick,
 } from "./detection/ResultTracker.js";
+export {
+  cropBarcodeFrame,
+  computeCropRect,
+  enhanceCropPixels,
+  softenCropPixels,
+} from "./processing/cropBarcode.js";
+export type {
+  CropSource,
+  CropBarcodeOptions,
+  CropRect,
+} from "./processing/cropBarcode.js";
+export { annotateBarcodeImage } from "./processing/annotateBarcodeImage.js";
+export type {
+  AnnotateSource,
+  AnnotateBarcodeImageOptions,
+} from "./processing/annotateBarcodeImage.js";
+export {
+  computeCenterZoomGeometry,
+  createCenterZoomCanvas,
+  mapResultsFromCenterZoom,
+} from "./processing/centerZoom.js";
+export type {
+  CenterZoomOptions,
+  CenterZoomGeometry,
+  CenterZoomCanvas,
+} from "./processing/centerZoom.js";
+export {
+  decodeWithFallbacks,
+  resizeCanvas,
+  rotateCanvas,
+  enhanceForDecode,
+  mapResultFromScale,
+  mapResultFromRotation,
+  unrotatePoint,
+  DEFAULT_DECODE_SCALES,
+  DEFAULT_DECODE_ROTATIONS,
+} from "./processing/decodePipeline.js";
+export type {
+  DecodePipelineOptions,
+  DecodeRotationDegrees,
+  OwnedCanvas,
+} from "./processing/decodePipeline.js";
+export type { DuplicateFilterMode } from "./processing/DuplicateFilter.js";
 export {
   toCornerPoints,
   scaleResultsToSource,

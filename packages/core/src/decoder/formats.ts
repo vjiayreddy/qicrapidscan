@@ -11,6 +11,7 @@ export const ONE_D_FORMATS: readonly BarcodeFormat[] = [
   "CODE_39",
   "CODE_93",
   "ITF",
+  "CODABAR",
 ] as const;
 
 /** Matrix / 2D symbologies. */

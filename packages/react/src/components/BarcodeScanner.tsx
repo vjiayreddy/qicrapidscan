@@ -21,11 +21,18 @@ export interface BarcodeScannerProps {
   formats?: BarcodeFormat[];
   multiple?: boolean;
   facingMode?: "user" | "environment";
+  /** Camera constraints (merged with `facingMode`). */
+  camera?: BarcodeScannerOptions["camera"];
   autoStart?: boolean;
   /** Extra detection limits (merged with `multiple`). */
   detection?: BarcodeScannerOptions["detection"];
   /** Live-frame performance knobs (interval, downscale). */
   performance?: BarcodeScannerOptions["performance"];
+  duplicateFilter?: BarcodeScannerOptions["duplicateFilter"];
+  /** Attach JPEG crop thumbnails on accepted live results. */
+  captureCrop?: boolean;
+  /** Already-scanned `format:text` keys for session dedupe across remounts. */
+  seenKeys?: readonly string[];
   onResult?: (results: BarcodeResult[]) => void;
   onOverlay?: (results: BarcodeResult[]) => void;
   onError?: (error: Error) => void;
@@ -56,9 +63,13 @@ export function BarcodeScanner(props: BarcodeScannerProps) {
     formats,
     multiple = false,
     facingMode = "environment",
+    camera,
     autoStart = true,
     detection,
     performance,
+    duplicateFilter,
+    captureCrop = false,
+    seenKeys,
     onResult,
     onOverlay,
     onError,
@@ -95,7 +106,10 @@ export function BarcodeScanner(props: BarcodeScannerProps) {
     formats,
     detection: { multiple, ...detection },
     performance,
-    camera: { facingMode },
+    duplicateFilter,
+    captureCrop,
+    seenKeys,
+    camera: { ...camera, facingMode: camera?.facingMode ?? facingMode },
     autoStart,
     onResult,
     onOverlay,

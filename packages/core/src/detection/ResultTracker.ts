@@ -115,6 +115,18 @@ function lerpPoints(previous: Point[], next: Point[], amount: number): Point[] {
   return mixed;
 }
 
+/** Higher blend when the track moves a lot; stickier when nearly still. */
+export function adaptiveSmooth(
+  previous: Point[],
+  next: Point[],
+  baseSmooth: number,
+): number {
+  const extent = Math.max(boxExtent(previous), boxExtent(next), 1);
+  const motion = distance(centroid(previous), centroid(next)) / extent;
+  const boosted = baseSmooth + motion * 0.55;
+  return Math.min(0.62, Math.max(0.12, boosted));
+}
+
 function matchThreshold(track: SpatialTrack): number {
   return Math.max(56, boxExtent(track.last.cornerPoints) * 0.9);
 }
@@ -278,12 +290,18 @@ export class ResultTracker {
       return;
     }
 
+    const amount = adaptiveSmooth(
+      track.last.cornerPoints,
+      detection.cornerPoints,
+      this.options.smooth,
+    );
+
     track.last = {
       ...track.last,
       cornerPoints: lerpPoints(
         track.last.cornerPoints,
         detection.cornerPoints,
-        this.options.smooth,
+        amount,
       ),
       timestamp: detection.timestamp,
       text: detection.text,

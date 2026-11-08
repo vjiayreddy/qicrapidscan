@@ -3,33 +3,69 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { BarcodeFormat, BarcodeResult } from "@qicrapidscan/core";
-import { ALL_SUPPORTED_FORMATS } from "@qicrapidscan/core";
+import {
+  ALL_SUPPORTED_FORMATS,
+  annotateBarcodeImage,
+  ONE_D_FORMATS,
+  TWO_D_FORMATS,
+} from "@qicrapidscan/core";
 import {
   BarcodeScanner,
   useBarcodeScanner,
-  useElementSize,
   type RoiRect,
 } from "@qicrapidscan/react";
 import "@qicrapidscan/react/styles.css";
+import { ModePicker, type DemoMode } from "./mode-picker";
+import {
+  LatestScanToast,
+  ScanHistoryDrawer,
+  scanValueKey,
+  type ScanHistoryItem,
+} from "./scan-history";
 import { SettingsDrawer, type BarcodeTab } from "./settings-drawer";
 import { UploadPanel } from "./upload-panel";
 
 type FacingMode = "user" | "environment";
 
 const LIVE_PERFORMANCE = {
-  scanInterval: 150,
-  maxWidth: 800,
-  maxHeight: 450,
-  tryHarder: false,
+  scanInterval: 120,
+  maxWidth: 1600,
+  maxHeight: 900,
+  tryHarder: true,
+  alsoInverted: true,
+  imageEnhancement: true,
   liveFormatBanding: true,
+  liveZoom: true,
+  // Tighter center crop + stronger upscale for far / small codes.
+  liveZoomCropRatio: 0.4,
+  liveZoomScale: 3,
 } as const;
+
+const LIVE_CAMERA = {
+  facingMode: "environment" as const,
+  width: 1920,
+  height: 1080,
+};
 
 const UPLOAD_DETECTION = {
   multiple: true,
-  maxResults: 10,
-  maxRegions: 12,
-  maxDepth: 2,
-  maxTimeMs: 400,
+  maxResults: 64,
+  maxRegions: 48,
+  maxDepth: 3,
+  overlap: 0.25,
+  // Dense Data Matrix packs + edge 1D need a longer tile budget.
+  maxTimeMs: 8000,
+} as const;
+
+const UPLOAD_PERFORMANCE = {
+  // Keep more resolution so tiny tray Data Matrices stay readable after downscale.
+  maxWidth: 2560,
+  maxHeight: 2560,
+  tryHarder: true,
+  alsoInverted: true,
+  multiScale: true,
+  rotationRetry: true,
+  imageEnhancement: true,
 } as const;
 
 const FINDER_ROI: RoiRect = {
@@ -62,9 +98,17 @@ function playBeep() {
   }
 }
 
+function formatsForMode(mode: DemoMode): Set<BarcodeFormat> {
+  if (mode === "1d" || mode === "image-1d") return new Set(ONE_D_FORMATS);
+  if (mode === "2d" || mode === "image-2d") return new Set(TWO_D_FORMATS);
+  return new Set(ALL_SUPPORTED_FORMATS);
+}
+
 export function ScannerDemo() {
+  const [demoMode, setDemoMode] = useState<DemoMode | null>(null);
   const [facingMode, setFacingMode] = useState<FacingMode>("environment");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [multiple, setMultiple] = useState(false);
@@ -77,13 +121,15 @@ export function ScannerDemo() {
   const [enabledFormats, setEnabledFormats] = useState(
     () => new Set<BarcodeFormat>(ALL_SUPPORTED_FORMATS),
   );
-  const [latest, setLatest] = useState<BarcodeResult | null>(null);
+  const [history, setHistory] = useState<ScanHistoryItem[]>([]);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [roi, setRoi] = useState<RoiRect>(FINDER_ROI);
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+  const [uploadResultImage, setUploadResultImage] = useState<string | null>(
+    null,
+  );
   const [uploadResults, setUploadResults] = useState<BarcodeResult[]>([]);
-  const [uploadSize, setUploadSize] = useState({ width: 0, height: 0 });
 
   const formats = useMemo(() => {
     const selected = ALL_SUPPORTED_FORMATS.filter((f) => enabledFormats.has(f));
@@ -91,34 +137,132 @@ export function ScannerDemo() {
   }, [enabledFormats]);
 
   const formatsKey = formats.join(",");
-  const uploadFrameRef = useRef<HTMLDivElement | null>(null);
-  const uploadFrameSize = useElementSize(uploadFrameRef);
   const beepRef = useRef(beepTone);
   beepRef.current = beepTone;
+  const seenRef = useRef(new Set<string>());
+
+  const seenKeys = useMemo(
+    () => history.map((item) => scanValueKey(item)),
+    [history],
+  );
+
+  const isLiveMode = demoMode === "1d" || demoMode === "2d";
+  const isImageMode =
+    demoMode === "image" ||
+    demoMode === "image-1d" ||
+    demoMode === "image-2d";
 
   const onLiveResult = useCallback((results: BarcodeResult[]) => {
     if (results.length === 0) return;
+
+    const fresh: ScanHistoryItem[] = [];
+    for (const result of results) {
+      const key = scanValueKey(result);
+      if (seenRef.current.has(key)) continue;
+      seenRef.current.add(key);
+      fresh.push({ ...result, scannedAt: Date.now() });
+    }
+    if (fresh.length === 0) return;
+
     if (beepRef.current) playBeep();
-    setLatest(results[0] ?? null);
+    setHistory((prev) => [...fresh, ...prev].slice(0, 50));
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    seenRef.current.clear();
+    setHistory([]);
   }, []);
 
   const upload = useBarcodeScanner({
     formats,
-    detection: { ...UPLOAD_DETECTION },
-    performance: { maxWidth: 1280, maxHeight: 720 },
+    detection: { ...UPLOAD_DETECTION, multiple },
+    performance: { ...UPLOAD_PERFORMANCE },
+    captureCrop: true,
     autoStart: false,
     onError: (err) => setUploadError(err.message),
   });
 
-  useEffect(() => {
-    setUploadResults([]);
-  }, [formatsKey]);
+  const uploadPreviewRef = useRef<string | null>(null);
+  uploadPreviewRef.current = uploadPreview;
+
+  const applyUploadResults = useCallback(
+    (img: HTMLImageElement, results: BarcodeResult[]) => {
+      setUploadResults(results);
+      if (results.length > 0 && showOverlay) {
+        setUploadResultImage(
+          annotateBarcodeImage(img, results, {
+            maxEdge: 2048,
+            showLandmarks: true,
+            showIndices: true,
+          }),
+        );
+      } else {
+        setUploadResultImage(null);
+      }
+    },
+    [showOverlay],
+  );
 
   useEffect(() => {
-    if (!latest) return;
-    const id = window.setTimeout(() => setLatest(null), 3200);
-    return () => window.clearTimeout(id);
-  }, [latest]);
+    setUploadResults([]);
+    setUploadResultImage(null);
+  }, [formatsKey]);
+
+  // Re-decode the current image when formats / multiple change.
+  useEffect(() => {
+    const url = uploadPreviewRef.current;
+    if (!url) return;
+    let cancelled = false;
+    void (async () => {
+      setUploadBusy(true);
+      setUploadError(null);
+      try {
+        const img = await loadImage(url);
+        if (cancelled) return;
+        const results = await upload.scanImage(img);
+        if (cancelled) return;
+        applyUploadResults(img, results);
+      } catch (err) {
+        if (!cancelled) {
+          setUploadError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) setUploadBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-scan on format/multiple only
+  }, [formatsKey, multiple, applyUploadResults]);
+
+  // Rebuild annotated result image when overlay toggle changes (no re-decode).
+  useEffect(() => {
+    const url = uploadPreviewRef.current;
+    if (!url || uploadResults.length === 0) {
+      setUploadResultImage(null);
+      return;
+    }
+    if (!showOverlay) {
+      setUploadResultImage(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const img = await loadImage(url);
+      if (cancelled) return;
+      setUploadResultImage(
+        annotateBarcodeImage(img, uploadResults, {
+          maxEdge: 2048,
+          showLandmarks: true,
+          showIndices: true,
+        }),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showOverlay, uploadResults]);
 
   const clearUpload = useCallback(() => {
     setUploadPreview((prev) => {
@@ -126,9 +270,39 @@ export function ScannerDemo() {
       return null;
     });
     setUploadResults([]);
-    setUploadSize({ width: 0, height: 0 });
+    setUploadResultImage(null);
     setUploadError(null);
     setUploadBusy(false);
+  }, []);
+
+  const returnToPicker = useCallback(() => {
+    setDemoMode(null);
+    setDrawerOpen(false);
+    setHistoryOpen(false);
+    setUploadOpen(false);
+    setLiveError(null);
+    clearHistory();
+    setEditRoi(false);
+    clearUpload();
+  }, [clearUpload, clearHistory]);
+
+  const selectMode = useCallback((mode: DemoMode) => {
+    const image =
+      mode === "image" || mode === "image-1d" || mode === "image-2d";
+    setEnabledFormats(formatsForMode(mode));
+    setBarcodeTab(
+      mode === "2d" || mode === "image-2d" ? "2d" : "1d",
+    );
+    setShowAllFormats(false);
+    // Image multi-detect on by default; live stays single unless toggled.
+    setMultiple(image);
+    setLiveError(null);
+    seenRef.current.clear();
+    setHistory([]);
+    setDrawerOpen(false);
+    setHistoryOpen(false);
+    setUploadOpen(image);
+    setDemoMode(mode);
   }, []);
 
   const onUploadFile = useCallback(
@@ -136,6 +310,7 @@ export function ScannerDemo() {
       if (!file) return;
       setUploadError(null);
       setUploadResults([]);
+      setUploadResultImage(null);
       setUploadBusy(true);
 
       const url = URL.createObjectURL(file);
@@ -146,12 +321,8 @@ export function ScannerDemo() {
 
       try {
         const img = await loadImage(url);
-        setUploadSize({
-          width: img.naturalWidth,
-          height: img.naturalHeight,
-        });
         const results = await upload.scanImage(img);
-        setUploadResults(results);
+        applyUploadResults(img, results);
         if (results.length > 0 && beepRef.current) playBeep();
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : String(err));
@@ -159,7 +330,7 @@ export function ScannerDemo() {
         setUploadBusy(false);
       }
     },
-    [upload],
+    [upload, applyUploadResults],
   );
 
   useEffect(() => {
@@ -192,98 +363,155 @@ export function ScannerDemo() {
     });
   };
 
-  const overlayOpen = drawerOpen || uploadOpen;
+  if (demoMode === null) {
+    return <ModePicker onSelect={selectMode} />;
+  }
+
+  const overlayOpen = drawerOpen || historyOpen || uploadOpen;
+  const latest = history[0] ?? null;
 
   return (
     <div className="pg-scan-hud">
       <div className="pg-scan-hud__stage">
-        <BarcodeScanner
-          key={`live-${formatsKey}-${facingMode}-${multiple}`}
-          formats={formats}
-          facingMode={facingMode}
-          multiple={multiple}
-          performance={{ ...LIVE_PERFORMANCE }}
-          autoStart
-          showGuide={showGuide}
-          showOverlay={showOverlay}
-          showLaser={showGuide && !editRoi}
-          roi={roi}
-          guideEditing={editRoi}
-          onRoiChange={setRoi}
-          guideLabel="Move the finder over a barcode"
-          onResult={onLiveResult}
-          onError={(err) => setLiveError(err.message)}
-          className="pg-scan-hud__scanner"
-          style={{ width: "100%", height: "100%", background: "#0a0a0a" }}
-          videoStyle={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
+        {isLiveMode ? (
+          <BarcodeScanner
+            key={`live-${demoMode}-${formatsKey}-${facingMode}-${multiple}`}
+            formats={formats}
+            facingMode={facingMode}
+            multiple={multiple}
+            detection={
+              multiple
+                ? {
+                    multiple: true,
+                    maxResults: 10,
+                    maxRegions: 12,
+                    maxDepth: 2,
+                    maxTimeMs: 280,
+                  }
+                : undefined
+            }
+            performance={{ ...LIVE_PERFORMANCE }}
+            camera={{ ...LIVE_CAMERA, facingMode }}
+            duplicateFilter={{ enabled: true, mode: "once" }}
+            captureCrop
+            seenKeys={seenKeys}
+            autoStart
+            showGuide={showGuide}
+            showOverlay={showOverlay}
+            showLaser={showGuide && !editRoi}
+            roi={roi}
+            guideEditing={editRoi}
+            onRoiChange={setRoi}
+            guideLabel="Move the finder over a barcode"
+            onResult={onLiveResult}
+            onError={(err) => setLiveError(err.message)}
+            className="pg-scan-hud__scanner"
+            style={{ width: "100%", height: "100%", background: "#0a0a0a" }}
+            videoStyle={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          <div className="pg-scan-hud__image-shell" aria-hidden />
+        )}
 
-        <div className="pg-scan-hud__chrome" aria-hidden={overlayOpen}>
-          <header className="pg-scan-hud__top">
-            <Link
-              href="/"
-              className="pg-scan-hud__icon-btn"
-              aria-label="Back to home"
-            >
-              <HomeIcon />
-            </Link>
-            <div className="pg-scan-hud__top-right">
+        {isLiveMode ? (
+          <div className="pg-scan-hud__chrome" aria-hidden={overlayOpen}>
+            <header className="pg-scan-hud__top">
               <button
                 type="button"
                 className="pg-scan-hud__icon-btn"
-                aria-label="Flip camera"
-                onClick={flipCamera}
+                aria-label="Back to mode picker"
+                onClick={returnToPicker}
               >
-                <FlipCameraIcon />
+                <BackIcon />
               </button>
+              <div className="pg-scan-hud__top-right">
+                <button
+                  type="button"
+                  className="pg-scan-hud__history-btn"
+                  aria-label="Open scan history"
+                  aria-expanded={historyOpen}
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    setUploadOpen(false);
+                    setHistoryOpen(true);
+                  }}
+                >
+                  <HistoryIcon />
+                  <span>History</span>
+                  {history.length > 0 ? (
+                    <span className="pg-scan-hud__history-count">
+                      {history.length}
+                    </span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  className="pg-scan-hud__icon-btn"
+                  aria-label="Flip camera"
+                  onClick={flipCamera}
+                >
+                  <FlipCameraIcon />
+                </button>
+                <button
+                  type="button"
+                  className="pg-scan-hud__icon-btn"
+                  aria-label="Open settings"
+                  aria-expanded={drawerOpen}
+                  onClick={() => {
+                    setHistoryOpen(false);
+                    setDrawerOpen(true);
+                  }}
+                >
+                  <SettingsIcon />
+                </button>
+              </div>
+            </header>
+
+            <Link href="/docs" className="pg-scan-hud__sdk-pill">
+              Try the SDK in your project ↗
+            </Link>
+
+            <div className="pg-scan-hud__bottom">
               <button
                 type="button"
-                className="pg-scan-hud__icon-btn"
-                aria-label="Open settings"
-                aria-expanded={drawerOpen}
-                onClick={() => setDrawerOpen(true)}
+                className="pg-scan-hud__upload-btn"
+                onClick={() => {
+                  setDrawerOpen(false);
+                  setHistoryOpen(false);
+                  setUploadOpen(true);
+                }}
               >
-                <SettingsIcon />
+                <GalleryIcon />
+                <span>Upload image</span>
               </button>
             </div>
-          </header>
-
-          <Link href="/docs" className="pg-scan-hud__sdk-pill">
-            Try the SDK in your project ↗
-          </Link>
-
-          <div className="pg-scan-hud__bottom">
-            <button
-              type="button"
-              className="pg-scan-hud__upload-btn"
-              onClick={() => {
-                setDrawerOpen(false);
-                setUploadOpen(true);
-              }}
-            >
-              <GalleryIcon />
-              <span>Upload image</span>
-            </button>
-          </div>
-        </div>
-
-        {latest && !overlayOpen ? (
-          <div className="pg-scan-hud__toast" role="status">
-            <span className="pg-scan-hud__toast-format">{latest.format}</span>
-            <span className="pg-scan-hud__toast-text">{latest.text}</span>
           </div>
         ) : null}
 
-        {liveError && !overlayOpen ? (
+        {latest && isLiveMode && !overlayOpen ? (
+          <LatestScanToast item={latest} />
+        ) : null}
+
+        {liveError && isLiveMode && !overlayOpen ? (
           <p className="pg-scan-hud__error" role="alert">
             {liveError}
           </p>
         ) : null}
       </div>
 
+      {isLiveMode ? (
+        <ScanHistoryDrawer
+          open={historyOpen}
+          items={history}
+          onClose={() => setHistoryOpen(false)}
+          onClear={clearHistory}
+        />
+      ) : null}
+
       <SettingsDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
+        variant={isImageMode || uploadOpen ? "image" : "live"}
         multiple={multiple}
         onMultipleChange={setMultiple}
         showGuide={showGuide}
@@ -307,17 +535,29 @@ export function ScannerDemo() {
       />
 
       <UploadPanel
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
+        open={uploadOpen || isImageMode}
+        onClose={() => {
+          if (isImageMode) {
+            returnToPicker();
+            return;
+          }
+          setUploadOpen(false);
+        }}
         busy={uploadBusy}
         error={uploadError}
         previewUrl={uploadPreview}
+        resultImageUrl={uploadResultImage}
         results={uploadResults}
-        sourceSize={uploadSize}
-        frameRef={uploadFrameRef}
-        frameSize={uploadFrameSize}
         onFile={(file) => void onUploadFile(file)}
         onClear={clearUpload}
+        backAriaLabel={
+          isImageMode ? "Back to mode picker" : "Back to live scan"
+        }
+        backButtonLabel={isImageMode ? "Back to menu" : "Back to camera"}
+        onOpenSettings={() => {
+          setHistoryOpen(false);
+          setDrawerOpen(true);
+        }}
       />
     </div>
   );
@@ -332,13 +572,14 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function HomeIcon() {
+function BackIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
-        d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"
+        d="M15 5 8 12l7 7"
         stroke="currentColor"
-        strokeWidth="1.75"
+        strokeWidth="2"
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
@@ -362,6 +603,33 @@ function FlipCameraIcon() {
       />
       <path
         d="M8.5 12.5 9.8 9.8 12.5 11"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 7v5l3 2"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3.5 12a8.5 8.5 0 1 0 2.2-5.7"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+      <path
+        d="M3.5 4.5v4h4"
         stroke="currentColor"
         strokeWidth="1.75"
         strokeLinecap="round"

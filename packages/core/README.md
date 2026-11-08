@@ -8,10 +8,17 @@ See also: [getting started](../../docs/getting-started.md), [API](../../docs/api
 
 - Camera live scanning via `start(video)` / `stop` / `pause` / `resume`
 - Image scanning via `scanImage(Blob | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement)`
-- ZXing (`@zxing/library`) behind an internal adapter
+- ZXing-WASM via `barcode-detector` ponyfill (Barcode Detection API–compatible)
+- Native multi-symbol `detect()` for dense still images; tiling as fallback
+- Decode options: formats, try-harder / inverted (engine-dependent), still-image
+  multi-scale / contrast / rotation fallbacks
 - Typed errors + `result` / `error` events
-- Multi-barcode: set `detection.multiple: true` (bounded region/tile strategy)
-- CDN IIFE/ESM builds → `window.QicRapidScan`
+- Multi-barcode: set `detection.multiple: true`
+- CDN IIFE/ESM builds → `window.QicRapidScan` (WASM fetched at runtime)
+
+Camera integration is hand-rolled (`CameraManager` + canvas frames). The decoder
+stays independent of camera/UI and works the same for React, Vue, Angular, and
+vanilla JS.
 
 ```ts
 const scanner = new BarcodeScanner({
@@ -64,6 +71,13 @@ import { BarcodeScanner } from "@qicrapidscan/core";
 
 const scanner = new BarcodeScanner({
   formats: ["QR_CODE", "EAN_13", "CODE_128"],
+  performance: {
+    tryHarder: true,
+    alsoInverted: true,
+    multiScale: true,
+    rotationRetry: true,
+    imageEnhancement: true,
+  },
 });
 
 scanner.on("result", (results) => {

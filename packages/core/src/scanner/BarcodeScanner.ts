@@ -10,6 +10,12 @@ import { MultiBarcodeDetector } from "../detection/MultiBarcodeDetector.js";
 import { BarcodeError } from "../errors/BarcodeError.js";
 import { EventEmitter } from "../events/EventEmitter.js";
 import { DuplicateFilter } from "../processing/DuplicateFilter.js";
+import {
+  createCenterZoomCanvas,
+  mapResultsFromCenterZoom,
+} from "../processing/centerZoom.js";
+import { cropBarcodeFrame } from "../processing/cropBarcode.js";
+import { decodeWithFallbacks } from "../processing/decodePipeline.js";
 import { FrameProcessor } from "../processing/FrameProcessor.js";
 import { ImageScanner, type ImageSource } from "../processing/ImageScanner.js";
 import { drawVideoFrame } from "../processing/canvas.js";
@@ -64,14 +70,23 @@ export class BarcodeScanner {
     this.duplicateFilter = new DuplicateFilter(
       this.resolved.duplicateFilter.enabled,
       this.resolved.duplicateFilter.cooldown,
+      this.resolved.duplicateFilter.mode,
     );
     this.frameProcessor = new FrameProcessor(this.resolved.performance.scanInterval);
     this.tracker = new ResultTracker({
-      dedupeWindowMs: this.resolved.duplicateFilter.cooldown,
+      dedupeWindowMs:
+        this.resolved.duplicateFilter.mode === "once"
+          ? Number.POSITIVE_INFINITY
+          : this.resolved.duplicateFilter.cooldown,
       confirmHits: 1,
-      missFrames: 4,
-      smooth: 0.22,
+      missFrames: 6,
+      smooth: 0.28,
     });
+  }
+
+  /** Mark format:text values as already scanned (survives remount seeding). */
+  seedSeen(keys: Iterable<string>): void {
+    this.duplicateFilter.seed(keys);
   }
 
   getOptions(): Readonly<BarcodeScannerOptions> {
@@ -135,7 +150,10 @@ export class BarcodeScanner {
     try {
       // Image scans always use the full configured format list (not live bands).
       this.decoder!.setFormats(this.resolved.formats);
-      const results = await this.imageScanner!.scan(source);
+      let results = await this.imageScanner!.scan(source);
+      if (results.length > 0 && this.resolved.captureCrop) {
+        results = await this.attachImageCrops(source, results);
+      }
       if (results.length > 0) {
         this.events.emit("result", results);
         this.events.emit("overlay", results);
@@ -152,6 +170,19 @@ export class BarcodeScanner {
       this.events.emit("error", mapped);
       throw mapped;
     }
+  }
+
+  /** Attach JPEG `cropDataUrl` thumbs from still-image geometry. */
+  private async attachImageCrops(
+    source: ImageSource,
+    results: BarcodeResult[],
+  ): Promise<BarcodeResult[]> {
+    const cropSource = await resolveCropSource(source);
+    if (!cropSource) return results;
+    return results.map((item) => {
+      const cropDataUrl = cropBarcodeFrame(cropSource, item);
+      return cropDataUrl ? { ...item, cropDataUrl } : item;
+    });
   }
 
   async getCameras(): Promise<CameraDevice[]> {
@@ -240,10 +271,12 @@ export class BarcodeScanner {
         this.decoder = createDefaultDecoder(
           this.resolved.formats,
           this.resolved.performance.tryHarder,
+          this.resolved.performance.alsoInverted,
         );
       }
       this.decoder.setFormats(this.resolved.formats);
       this.decoder.setTryHarder?.(this.resolved.performance.tryHarder);
+      this.decoder.setAlsoInverted?.(this.resolved.performance.alsoInverted);
     }
     if (!this.camera) {
       this.camera = this.injectedCamera ?? new CameraManager();
@@ -277,6 +310,14 @@ export class BarcodeScanner {
         overlap: this.resolved.detection.overlap,
         maxTimeMs: this.resolved.detection.maxTimeMs,
       },
+      multiScale: this.resolved.performance.multiScale,
+      rotationRetry: this.resolved.performance.rotationRetry,
+      imageEnhancement: this.resolved.performance.imageEnhancement,
+      tryHarder: this.resolved.performance.tryHarder,
+      // Keep per-tile decode cheap so multi-detect can visit more regions
+      // within maxTimeMs. Full-frame fallbacks still run after tiling.
+      regionFallbacks: false,
+      formats: this.resolved.formats,
     };
   }
 
@@ -304,21 +345,43 @@ export class BarcodeScanner {
 
       let results: BarcodeResult[] = [];
       if (this.resolved.detection.multiple && this.multiDetector) {
-        results = this.multiDetector.detect(sized.canvas).results;
+        const multi = await this.multiDetector.detect(sized.canvas);
         results = scaleResultsToSource(
-          results,
+          multi.results,
           sized.canvas.width,
           sized.canvas.height,
           sized.sourceWidth,
           sized.sourceHeight,
         );
       } else {
-        const decoded = this.decoder.decode({
+        const decoded = await this.decoder.decode({
           canvas: sized.canvas,
           sourceWidth: sized.sourceWidth,
           sourceHeight: sized.sourceHeight,
         });
         if (decoded) results = [decoded];
+      }
+
+      // Far/small symbols often vanish after downscale — center crop + upscale.
+      if (results.length === 0 && this.resolved.performance.liveZoom) {
+        results = await this.decodeLiveZoom(
+          sized.canvas,
+          sized.sourceWidth,
+          sized.sourceHeight,
+        );
+      }
+
+      // Optional enhance-only pass on the zoom crop (no live rotation).
+      if (
+        results.length === 0 &&
+        this.resolved.performance.liveZoom &&
+        this.resolved.performance.imageEnhancement
+      ) {
+        results = await this.decodeLiveZoomEnhanced(
+          sized.canvas,
+          sized.sourceWidth,
+          sized.sourceHeight,
+        );
       }
 
       const tracked = results
@@ -336,7 +399,13 @@ export class BarcodeScanner {
 
       if (tick.accepted.length > 0) {
         // Keep DuplicateFilter as a secondary gate for result consumers.
-        const accepted = this.duplicateFilter.filter(tick.accepted);
+        let accepted = this.duplicateFilter.filter(tick.accepted);
+        if (accepted.length > 0 && this.resolved.captureCrop) {
+          accepted = accepted.map((item) => {
+            const cropDataUrl = cropBarcodeFrame(video, item);
+            return cropDataUrl ? { ...item, cropDataUrl } : item;
+          });
+        }
         if (accepted.length > 0) {
           this.events.emit("result", accepted);
         }
@@ -358,6 +427,79 @@ export class BarcodeScanner {
       this.adaptLiveInterval(performance.now() - started);
       // Let the browser paint (laser / overlay) before the next decode.
       await yieldToMain();
+    }
+  }
+
+  /**
+   * Second-pass live decode: center crop + upscale so distant / small codes
+   * still have enough module resolution after the full-frame downscale.
+   */
+  private async decodeLiveZoom(
+    processingCanvas: HTMLCanvasElement,
+    sourceWidth: number,
+    sourceHeight: number,
+  ): Promise<BarcodeResult[]> {
+    if (!this.decoder) return [];
+
+    const zoom = createCenterZoomCanvas(processingCanvas, {
+      cropRatio: this.resolved.performance.liveZoomCropRatio,
+      scale: this.resolved.performance.liveZoomScale,
+    });
+    const restoreTryHarder = this.resolved.performance.tryHarder;
+
+    try {
+      // Zoom pass always tries harder — blur/low-contrast far codes need it.
+      this.decoder.setTryHarder?.(true);
+      const decoded = await this.decoder.decode({ canvas: zoom.canvas });
+      if (!decoded) return [];
+
+      return scaleResultsToSource(
+        mapResultsFromCenterZoom([decoded], zoom),
+        processingCanvas.width,
+        processingCanvas.height,
+        sourceWidth,
+        sourceHeight,
+      );
+    } finally {
+      this.decoder.setTryHarder?.(restoreTryHarder);
+      zoom.cleanup();
+    }
+  }
+
+  /**
+   * Third-pass live decode: enhance the zoom crop only (no rotation ladder).
+   */
+  private async decodeLiveZoomEnhanced(
+    processingCanvas: HTMLCanvasElement,
+    sourceWidth: number,
+    sourceHeight: number,
+  ): Promise<BarcodeResult[]> {
+    if (!this.decoder) return [];
+
+    const zoom = createCenterZoomCanvas(processingCanvas, {
+      cropRatio: this.resolved.performance.liveZoomCropRatio,
+      scale: this.resolved.performance.liveZoomScale,
+    });
+
+    try {
+      const decoded = await decodeWithFallbacks(this.decoder, zoom.canvas, {
+        tryDirect: false,
+        enhancementOnly: true,
+        imageEnhancement: true,
+        forceTryHarderOnFallback: true,
+        restoreTryHarder: this.resolved.performance.tryHarder,
+      });
+      if (!decoded) return [];
+
+      return scaleResultsToSource(
+        mapResultsFromCenterZoom([decoded], zoom),
+        processingCanvas.width,
+        processingCanvas.height,
+        sourceWidth,
+        sourceHeight,
+      );
+    } finally {
+      zoom.cleanup();
     }
   }
 
@@ -404,4 +546,35 @@ function yieldToMain(): Promise<void> {
     }
     setTimeout(resolve, 0);
   });
+}
+
+async function resolveCropSource(
+  source: ImageSource,
+): Promise<HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | null> {
+  if (typeof HTMLImageElement !== "undefined" && source instanceof HTMLImageElement) {
+    return source;
+  }
+  if (typeof HTMLCanvasElement !== "undefined" && source instanceof HTMLCanvasElement) {
+    return source;
+  }
+  if (typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement) {
+    return source;
+  }
+  if (typeof Blob !== "undefined" && source instanceof Blob) {
+    const url = URL.createObjectURL(source);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Failed to decode crop source."));
+        image.src = url;
+      });
+      return img;
+    } catch {
+      return null;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  return null;
 }

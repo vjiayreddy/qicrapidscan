@@ -8,7 +8,7 @@ function mockDecoder(result: BarcodeResult | null = null): DecoderAdapter {
   return {
     name: "mock",
     setFormats: vi.fn(),
-    decode: vi.fn(() => result),
+    decode: vi.fn(async () => result),
     destroy: vi.fn(),
   };
 }
@@ -58,7 +58,18 @@ describe("BarcodeScanner (Phase 2)", () => {
 
   it("scanImage returns empty array without emitting when nothing found", async () => {
     const decoder = mockDecoder(null);
-    const scanner = new BarcodeScanner({ formats: ["QR_CODE"] }, { decoder });
+    // Disable canvas fallbacks — happy-dom has no real 2D context.
+    const scanner = new BarcodeScanner(
+      {
+        formats: ["QR_CODE"],
+        performance: {
+          multiScale: false,
+          rotationRetry: false,
+          imageEnhancement: false,
+        },
+      },
+      { decoder },
+    );
     const onResult = vi.fn();
     scanner.on("result", onResult);
 

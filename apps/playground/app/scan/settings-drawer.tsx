@@ -15,6 +15,7 @@ const FORMAT_LABELS: Record<BarcodeFormat, string> = {
   CODE_39: "Code 39",
   CODE_93: "Code 93",
   ITF: "ITF / Code 25",
+  CODABAR: "Codabar",
   QR_CODE: "QR Code",
   DATA_MATRIX: "Data Matrix",
   PDF_417: "PDF417",
@@ -24,6 +25,8 @@ const FORMAT_LABELS: Record<BarcodeFormat, string> = {
 type SettingsDrawerProps = {
   open: boolean;
   onClose: () => void;
+  /** Live camera settings vs still-image-only settings. Default live. */
+  variant?: "live" | "image";
   multiple: boolean;
   onMultipleChange: (value: boolean) => void;
   showGuide: boolean;
@@ -47,6 +50,7 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
   const {
     open,
     onClose,
+    variant = "live",
     multiple,
     onMultipleChange,
     showGuide,
@@ -68,6 +72,7 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
 
   if (!open) return null;
 
+  const isImage = variant === "image";
   const tabFormats = barcodeTab === "1d" ? ONE_D_FORMATS : TWO_D_FORMATS;
   const visibleFormats = showAllFormats ? tabFormats : tabFormats.slice(0, 4);
   const allEnabled = tabFormats.every((f) => enabledFormats.has(f));
@@ -104,37 +109,44 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
               checked={multiple}
               onChange={onMultipleChange}
             />
-            <ToggleRow
-              icon={<FinderIcon />}
-              label="View Finder"
-              checked={showGuide}
-              onChange={(value) => {
-                onShowGuideChange(value);
-                if (!value) onEditRoiChange(false);
-              }}
-            />
-            <ToggleRow
-              icon={<RoiIcon />}
-              label="Edit ROI"
-              checked={editRoi}
-              onChange={(value) => {
-                if (value) onShowGuideChange(true);
-                onEditRoiChange(value);
-              }}
-            />
+            {!isImage ? (
+              <>
+                <ToggleRow
+                  icon={<FinderIcon />}
+                  label="View Finder"
+                  checked={showGuide}
+                  onChange={(value) => {
+                    onShowGuideChange(value);
+                    if (!value) onEditRoiChange(false);
+                  }}
+                />
+                <ToggleRow
+                  icon={<RoiIcon />}
+                  label="Edit ROI"
+                  checked={editRoi}
+                  onChange={(value) => {
+                    if (value) onShowGuideChange(true);
+                    onEditRoiChange(value);
+                  }}
+                />
+              </>
+            ) : null}
             <ToggleRow
               icon={<BeepIcon />}
               label="Beep Tone"
               checked={beepTone}
               onChange={onBeepToneChange}
+              last={isImage}
             />
-            <ToggleRow
-              icon={<ArIcon />}
-              label="AR Overlay"
-              checked={showOverlay}
-              onChange={onShowOverlayChange}
-              last
-            />
+            {!isImage ? (
+              <ToggleRow
+                icon={<ArIcon />}
+                label="AR Overlay"
+                checked={showOverlay}
+                onChange={onShowOverlayChange}
+                last
+              />
+            ) : null}
           </div>
 
           <p className="pg-settings-drawer__section-label">Barcode settings</p>

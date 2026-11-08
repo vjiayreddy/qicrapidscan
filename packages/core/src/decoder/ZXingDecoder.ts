@@ -1,14 +1,9 @@
 import {
-  BarcodeFormat as ZXingBarcodeFormat,
-  BinaryBitmap,
-  DecodeHintType,
-  HTMLCanvasElementLuminanceSource,
-  HybridBinarizer,
-  MultiFormatReader,
-  NotFoundException,
-  RGBLuminanceSource,
-  type Result,
-} from "@zxing/library";
+  BarcodeDetector,
+  prepareZXingModule,
+  type BarcodeFormat as DetectorFormat,
+  type DetectedBarcode,
+} from "barcode-detector/ponyfill";
 import type { BarcodeFormat, BarcodeResult } from "../types/barcode.types.js";
 import type {
   DecodeCanvasInput,
@@ -17,211 +12,212 @@ import type {
 } from "./DecoderAdapter.js";
 import { DEFAULT_FORMATS } from "./formats.js";
 
-const TO_ZXING: Record<BarcodeFormat, ZXingBarcodeFormat> = {
-  EAN_8: ZXingBarcodeFormat.EAN_8,
-  EAN_13: ZXingBarcodeFormat.EAN_13,
-  UPC_A: ZXingBarcodeFormat.UPC_A,
-  UPC_E: ZXingBarcodeFormat.UPC_E,
-  CODE_128: ZXingBarcodeFormat.CODE_128,
-  CODE_39: ZXingBarcodeFormat.CODE_39,
-  CODE_93: ZXingBarcodeFormat.CODE_93,
-  ITF: ZXingBarcodeFormat.ITF,
-  QR_CODE: ZXingBarcodeFormat.QR_CODE,
-  DATA_MATRIX: ZXingBarcodeFormat.DATA_MATRIX,
-  PDF_417: ZXingBarcodeFormat.PDF_417,
-  AZTEC: ZXingBarcodeFormat.AZTEC,
+/** Map SDK formats → barcode-detector / Barcode Detection API format ids. */
+const TO_DETECTOR: Record<BarcodeFormat, DetectorFormat> = {
+  EAN_8: "ean_8",
+  EAN_13: "ean_13",
+  UPC_A: "upc_a",
+  UPC_E: "upc_e",
+  CODE_128: "code_128",
+  CODE_39: "code_39",
+  CODE_93: "code_93",
+  ITF: "itf",
+  CODABAR: "codabar",
+  QR_CODE: "qr_code",
+  DATA_MATRIX: "data_matrix",
+  PDF_417: "pdf417",
+  AZTEC: "aztec",
 };
 
-const FROM_ZXING = new Map<ZXingBarcodeFormat, BarcodeFormat>(
-  (Object.entries(TO_ZXING) as Array<[BarcodeFormat, ZXingBarcodeFormat]>).map(
-    ([format, zxing]) => [zxing, format],
-  ),
-);
+const FROM_DETECTOR = new Map<string, BarcodeFormat>([
+  ["ean_8", "EAN_8"],
+  ["ean_13", "EAN_13"],
+  ["upc_a", "UPC_A"],
+  ["upc_e", "UPC_E"],
+  ["code_128", "CODE_128"],
+  ["code_39", "CODE_39"],
+  ["code_93", "CODE_93"],
+  ["itf", "ITF"],
+  ["itf_14", "ITF"],
+  ["codabar", "CODABAR"],
+  ["qr_code", "QR_CODE"],
+  ["qr_code_model_1", "QR_CODE"],
+  ["qr_code_model_2", "QR_CODE"],
+  ["micro_qr_code", "QR_CODE"],
+  ["rm_qr_code", "QR_CODE"],
+  ["data_matrix", "DATA_MATRIX"],
+  ["pdf417", "PDF_417"],
+  ["compact_pdf417", "PDF_417"],
+  ["micro_pdf417", "PDF_417"],
+  ["aztec", "AZTEC"],
+  ["aztec_code", "AZTEC"],
+  ["aztec_rune", "AZTEC"],
+]);
+
+let wasmReady: Promise<void> | null = null;
+
+function ensureWasm(): Promise<void> {
+  if (!wasmReady) {
+    wasmReady = prepareZXingModule({ fireImmediately: true }).then(() => undefined);
+  }
+  return wasmReady;
+}
 
 function createResultId(format: BarcodeFormat, text: string): string {
   return `${format}:${text}`;
 }
 
-function mapResult(
-  result: Result,
+function mapDetected(
+  detected: DetectedBarcode,
   scaleX: number,
   scaleY: number,
 ): BarcodeResult | null {
-  const format = FROM_ZXING.get(result.getBarcodeFormat());
-  if (!format) {
-    return null;
-  }
+  const format = FROM_DETECTOR.get(detected.format);
+  if (!format) return null;
 
-  const text = result.getText();
-  const rawBytes = result.getRawBytes() ?? undefined;
-  const resultPoints = result.getResultPoints() ?? [];
+  const text = detected.rawValue;
+  const points = detected.cornerPoints.map((point) => ({
+    x: point.x * scaleX,
+    y: point.y * scaleY,
+  }));
 
-  const points = resultPoints
-    .filter((point): point is NonNullable<typeof point> => point != null)
-    .map((point) => ({
-      x: point.getX() * scaleX,
-      y: point.getY() * scaleY,
-    }));
-
-  let boundingBox: BarcodeResult["boundingBox"];
-  if (points.length >= 2) {
-    const xs = points.map((p) => p.x);
-    const ys = points.map((p) => p.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    boundingBox = {
-      x: minX,
-      y: minY,
-      width: maxX - minX,
-      height: maxY - minY,
-    };
-  }
+  const box = detected.boundingBox;
+  const boundingBox = {
+    x: box.x * scaleX,
+    y: box.y * scaleY,
+    width: box.width * scaleX,
+    height: box.height * scaleY,
+  };
 
   return {
     id: createResultId(format, text),
     text,
     format,
-    rawBytes: rawBytes ? Uint8Array.from(rawBytes) : undefined,
     boundingBox,
-    points: points.length > 0 ? points : undefined,
+    points,
     timestamp: Date.now(),
   };
 }
 
 /**
- * ZXing-backed decoder. Loaded via dynamic import from BarcodeScanner
- * so SSR consumers do not pull ZXing at module evaluation time.
+ * ZXing-WASM decoder via `barcode-detector` (Barcode Detection API ponyfill).
+ * Loaded via dynamic import from BarcodeScanner so SSR stays clean.
  */
 export class ZXingDecoder implements DecoderAdapter {
-  readonly name = "zxing";
-  private readonly reader = new MultiFormatReader();
+  readonly name = "zxing-wasm";
   private formats: BarcodeFormat[] = [...DEFAULT_FORMATS];
-  private tryHarder = false;
+  private detector: BarcodeDetector;
 
-  constructor(formats?: BarcodeFormat[], tryHarder = false) {
-    this.tryHarder = tryHarder;
+  constructor(
+    formats?: BarcodeFormat[],
+    _tryHarder = true,
+    _alsoInverted = true,
+  ) {
     if (formats && formats.length > 0) {
-      this.setFormats(formats);
-    } else {
-      this.applyHints();
+      this.formats = [...formats];
     }
+    this.detector = this.createDetector();
+    void ensureWasm();
   }
 
   setFormats(formats: BarcodeFormat[]): void {
     this.formats = formats.length > 0 ? [...formats] : [...DEFAULT_FORMATS];
-    this.applyHints();
+    this.detector = this.createDetector();
   }
 
-  setTryHarder(value: boolean): void {
-    this.tryHarder = value;
-    this.applyHints();
+  setTryHarder(_value: boolean): void {
+    // barcode-detector uses zxing-wasm defaults (tryHarder-like behavior built-in).
   }
 
-  decode(input: DecodeCanvasInput): BarcodeResult | null {
+  setAlsoInverted(_value: boolean): void {
+    // Inversion is handled inside zxing-wasm reader options of the ponyfill.
+  }
+
+  async decode(input: DecodeCanvasInput): Promise<BarcodeResult | null> {
+    const all = await this.decodeAll(input);
+    return all[0] ?? null;
+  }
+
+  async decodeAll(input: DecodeCanvasInput): Promise<BarcodeResult[]> {
     const { canvas, sourceWidth, sourceHeight } = input;
     const scaleX = sourceWidth && canvas.width > 0 ? sourceWidth / canvas.width : 1;
     const scaleY = sourceHeight && canvas.height > 0 ? sourceHeight / canvas.height : 1;
 
+    await ensureWasm();
     try {
-      const luminance = new HTMLCanvasElementLuminanceSource(canvas);
-      const bitmap = new BinaryBitmap(new HybridBinarizer(luminance));
-      return this.decodeBitmap(bitmap, scaleX, scaleY);
-    } catch (error) {
-      return this.handleDecodeError(error);
+      const detected = await this.detector.detect(canvas);
+      const mapped: BarcodeResult[] = [];
+      const seen = new Set<string>();
+      for (const item of detected) {
+        const result = mapDetected(item, scaleX, scaleY);
+        if (!result) continue;
+        const key = `${result.format}:${result.text}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        mapped.push(result);
+      }
+      return mapped;
+    } catch {
+      return [];
     }
   }
 
-  decodeRaster(input: DecodeRasterInput): BarcodeResult | null {
+  async decodeRaster(input: DecodeRasterInput): Promise<BarcodeResult | null> {
     const { data, width, height, sourceWidth, sourceHeight } = input;
-    const scaleX = sourceWidth && width > 0 ? sourceWidth / width : 1;
-    const scaleY = sourceHeight && height > 0 ? sourceHeight / height : 1;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
 
+    let rgba: Uint8ClampedArray;
+    if (data.length === width * height * 4) {
+      rgba = data;
+    } else if (data.length === width * height) {
+      rgba = new Uint8ClampedArray(width * height * 4);
+      for (let i = 0, j = 0; i < data.length; i += 1, j += 4) {
+        const v = data[i]!;
+        rgba[j] = v;
+        rgba[j + 1] = v;
+        rgba[j + 2] = v;
+        rgba[j + 3] = 255;
+      }
+    } else {
+      return null;
+    }
+
+    ctx.putImageData(
+      new ImageData(rgba as unknown as ImageDataArray, width, height),
+      0,
+      0,
+    );
     try {
-      // @zxing/library RGBLuminanceSource decodes greyscale reliably;
-      // RGBA buffers often fail NotFound even for clear codes.
-      const greyscale = toGreyscaleLuminance(data, width, height);
-      const luminance = new RGBLuminanceSource(greyscale, width, height);
-      const bitmap = new BinaryBitmap(new HybridBinarizer(luminance));
-      return this.decodeBitmap(bitmap, scaleX, scaleY);
-    } catch (error) {
-      return this.handleDecodeError(error);
+      return await this.decode({
+        canvas,
+        sourceWidth: sourceWidth ?? width,
+        sourceHeight: sourceHeight ?? height,
+      });
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
     }
   }
 
   destroy(): void {
-    this.reader.reset();
+    // BarcodeDetector has no dispose; drop reference.
   }
 
-  private decodeBitmap(
-    bitmap: BinaryBitmap,
-    scaleX: number,
-    scaleY: number,
-  ): BarcodeResult | null {
-    try {
-      const result = this.reader.decodeWithState(bitmap);
-      this.reader.reset();
-      return mapResult(result, scaleX, scaleY);
-    } catch (error) {
-      this.reader.reset();
-      return this.handleDecodeError(error);
-    }
+  private createDetector(): BarcodeDetector {
+    return new BarcodeDetector({
+      formats: this.formats.map((format) => TO_DETECTOR[format]),
+    });
   }
-
-  private handleDecodeError(error: unknown): null {
-    if (error instanceof NotFoundException) {
-      return null;
-    }
-    if (
-      error &&
-      typeof error === "object" &&
-      "name" in error &&
-      (error as { name: string }).name === "NotFoundException"
-    ) {
-      return null;
-    }
-    throw error;
-  }
-
-  private applyHints(): void {
-    const hints = new Map();
-    hints.set(
-      DecodeHintType.POSSIBLE_FORMATS,
-      this.formats.map((format) => TO_ZXING[format]),
-    );
-    hints.set(DecodeHintType.TRY_HARDER, this.tryHarder);
-    this.reader.setHints(hints);
-  }
-}
-
-function toGreyscaleLuminance(
-  data: Uint8ClampedArray,
-  width: number,
-  height: number,
-): Uint8ClampedArray {
-  const expectedRgba = width * height * 4;
-  if (data.length === width * height) {
-    return data;
-  }
-  if (data.length < expectedRgba) {
-    return data;
-  }
-
-  const greyscale = new Uint8ClampedArray(width * height);
-  for (let i = 0, j = 0; j < greyscale.length; i += 4, j += 1) {
-    const r = data[i] ?? 0;
-    const g = data[i + 1] ?? 0;
-    const b = data[i + 2] ?? 0;
-    // Rec. 601 luma
-    greyscale[j] = (r * 77 + g * 150 + b * 29) >> 8;
-  }
-  return greyscale;
 }
 
 export function createDefaultDecoder(
   formats?: BarcodeFormat[],
-  tryHarder = false,
+  tryHarder = true,
+  alsoInverted = true,
 ): DecoderAdapter {
-  return new ZXingDecoder(formats, tryHarder);
+  return new ZXingDecoder(formats, tryHarder, alsoInverted);
 }

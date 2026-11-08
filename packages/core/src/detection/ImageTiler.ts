@@ -20,7 +20,8 @@ export function createOverlappingTiles(options: TileOptions): Region[] {
 
   const overlapClamped = Math.min(Math.max(overlap, 0), 0.45);
   const minSide = Math.min(sourceWidth, sourceHeight);
-  const minTile = Math.min(minSide, Math.max(128, Math.floor(minSide * 0.45)));
+  // Allow denser grids for tray / pack photos (was ~45% → only ~2×2 tiles).
+  const minTile = Math.min(minSide, Math.max(160, Math.floor(minSide * 0.28)));
 
   // Largest grid whose tile (with overlap) still meets minTile.
   let cols = 1;

@@ -4,7 +4,11 @@ import typescript from "@rollup/plugin-typescript";
 import terser from "@rollup/plugin-terser";
 import dts from "rollup-plugin-dts";
 
-const external = ["@zxing/library"];
+const external = (id) =>
+  id === "barcode-detector" ||
+  id.startsWith("barcode-detector/") ||
+  id === "zxing-wasm" ||
+  id.startsWith("zxing-wasm/");
 
 const sharedPlugins = [
   resolve({ browser: true, preferBuiltins: false }),
@@ -18,7 +22,7 @@ const sharedPlugins = [
 
 /** @type {import('rollup').RollupOptions[]} */
 const config = [
-  // npm ESM + CJS (ZXing external)
+  // npm ESM + CJS (barcode-detector / zxing-wasm external)
   {
     input: "src/index.ts",
     external,
@@ -39,7 +43,7 @@ const config = [
     ],
     plugins: sharedPlugins,
   },
-  // CDN browser ESM (ZXing bundled)
+  // CDN browser ESM (barcode-detector bundled; WASM fetched at runtime)
   {
     input: "src/cdn.ts",
     output: {
@@ -50,7 +54,7 @@ const config = [
     },
     plugins: sharedPlugins,
   },
-  // CDN IIFE standalone (ZXing bundled, minified)
+  // CDN IIFE standalone (barcode-detector bundled, minified)
   {
     input: "src/cdn.ts",
     output: {

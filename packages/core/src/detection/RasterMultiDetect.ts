@@ -42,16 +42,16 @@ function cropRaster(source: RgbaRaster, region: Region): RgbaRaster {
   return { width, height, data };
 }
 
-function scanRasterRegion(
+async function scanRasterRegion(
   decoder: DecoderAdapter,
   source: RgbaRaster,
   region: Region,
-): BarcodeResult | null {
+): Promise<BarcodeResult | null> {
   if (!decoder.decodeRaster) {
     throw new Error("Decoder does not implement decodeRaster()");
   }
   const crop = cropRaster(source, region);
-  const decoded = decoder.decodeRaster({
+  const decoded = await decoder.decodeRaster({
     data: crop.data,
     width: crop.width,
     height: crop.height,
@@ -68,11 +68,11 @@ export interface RasterMultiDetectOutcome {
 }
 
 /** Node/browser-agnostic multi-detect over an RGBA buffer (for fixtures/benchmarks). */
-export function detectMultipleFromRaster(
+export async function detectMultipleFromRaster(
   decoder: DecoderAdapter,
   source: RgbaRaster,
   limits: MultiDetectLimits,
-): RasterMultiDetectOutcome {
+): Promise<RasterMultiDetectOutcome> {
   const started = Date.now();
   const aggregator = new ResultAggregator();
   const exclusions: Array<{ x: number; y: number; width: number; height: number }> = [];
@@ -111,7 +111,7 @@ export function detectMultipleFromRaster(
     if (regionMostlyExcluded(region, exclusions)) continue;
 
     regionsScanned += 1;
-    const decoded = scanRasterRegion(decoder, source, region);
+    const decoded = await scanRasterRegion(decoder, source, region);
     if (decoded) {
       aggregator.add(decoded);
       if (decoded.boundingBox) {
