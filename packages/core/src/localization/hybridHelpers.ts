@@ -153,15 +153,27 @@ export function paddedRoiRect(
 ): { x: number; y: number; width: number; height: number } {
   const square = options.square ?? true;
   const minPadPx = Math.max(0, options.minPadPx ?? 4);
-  const side = Math.max(roi.width, roi.height);
-  const pad = Math.max(side * padRatio, minPadPx);
 
-  let width = roi.width + pad * 2;
-  let height = roi.height + pad * 2;
+  let width: number;
+  let height: number;
   if (square) {
-    const squareSide = Math.max(width, height);
+    const side = Math.max(roi.width, roi.height);
+    const pad = Math.max(side * padRatio, minPadPx);
+    const squareSide = side + pad * 2;
     width = squareSide;
     height = squareSide;
+  } else {
+    // Linear / PDF417: pad the short axis more so quiet zones survive.
+    const short = Math.min(roi.width, roi.height);
+    const long = Math.max(roi.width, roi.height);
+    const padShort = Math.max(short * Math.max(padRatio, 0.65), minPadPx, 20);
+    const padLong = Math.max(long * Math.max(padRatio, 0.2), minPadPx, 8);
+    width = roi.width + (roi.width <= roi.height ? padShort : padLong) * 2;
+    height = roi.height + (roi.height <= roi.width ? padShort : padLong) * 2;
+    // Keep a usable short edge for thin vertical Code128 strips.
+    const minShort = 64;
+    if (roi.width <= roi.height && width < minShort) width = minShort;
+    if (roi.height <= roi.width && height < minShort) height = minShort;
   }
 
   width = Math.min(width, sourceWidth);

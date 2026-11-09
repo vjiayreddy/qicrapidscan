@@ -12,6 +12,7 @@ import {
   annotateBarcodeImage,
   ensureOpenCv,
   ONE_D_FORMATS,
+  PHARMA_LOCALIZER_CLASS_NAMES,
   TWO_D_FORMATS,
 } from "@qicrapidscan/core";
 import {
@@ -73,17 +74,19 @@ const UPLOAD_PERFORMANCE = {
   imageEnhancement: true,
 } as const;
 
-/** YOLO26 DataMatrix localizer — model staged under public/models/. */
+/** Pharma multi-barcode YOLO26 localizer — staged under public/models/. */
 const UPLOAD_LOCALIZATION = {
   enabled: true,
-  modelUrl: "/models/datamatrix-model.onnx",
+  modelUrl: "/models/pharma_multibarcodes.onnx",
   ortWasmBaseUrl: "/assets/ort/",
   /** Staged by `pnpm stage:localizer` — avoids Next bundling opencv-js (`fs`). */
   openCvScriptUrl: "/assets/opencv/opencv.js",
   inputSize: 1280,
   scoreThreshold: 0.25,
   iouThreshold: 0.45,
-  roiPadding: 0.1,
+  // Extra pad helps Code128 quiet zones and DataMatrix L-finders on labels.
+  roiPadding: 0.28,
+  classNames: PHARMA_LOCALIZER_CLASS_NAMES,
 } as const;
 
 const FINDER_ROI: RoiRect = {
@@ -116,9 +119,19 @@ function playBeep() {
   }
 }
 
+/** Still-image focus: Code128 + DataMatrix (pharma / shipping labels). */
+const IMAGE_FOCUS_FORMATS: readonly BarcodeFormat[] = [
+  "CODE_128",
+  "DATA_MATRIX",
+];
+
 function formatsForMode(mode: DemoMode): Set<BarcodeFormat> {
-  if (mode === "1d" || mode === "image-1d") return new Set(ONE_D_FORMATS);
-  if (mode === "2d" || mode === "image-2d") return new Set(TWO_D_FORMATS);
+  if (mode === "1d") return new Set(ONE_D_FORMATS);
+  if (mode === "2d") return new Set(TWO_D_FORMATS);
+  // All still-image modes enable Code128 + DataMatrix so both decode.
+  if (mode === "image" || mode === "image-1d" || mode === "image-2d") {
+    return new Set(IMAGE_FOCUS_FORMATS);
+  }
   return new Set(ALL_SUPPORTED_FORMATS);
 }
 
@@ -204,11 +217,14 @@ export function ScannerDemo() {
   });
 
   const localizationRois = uploadLocalization?.rois ?? [];
+  const localizationDecoded = localizationRois.filter((roi) => roi.decoded)
+    .length;
   const localizationLabel =
     uploadLocalization?.backend === "onnx"
-      ? `Boxes ${localizationRois.length} · Decoded ${
-          localizationRois.filter((roi) => roi.decoded).length
-        }`
+      ? `Boxes ${localizationRois.length} · Decoded ${Math.max(
+          localizationDecoded,
+          uploadResults.length,
+        )}`
       : uploadLocalization?.backend === "none" ||
           uploadLocalization?.backend === "passthrough"
         ? uploadLocalization.fallbackReason

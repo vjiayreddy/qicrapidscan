@@ -20,7 +20,13 @@ export {
   DEFAULT_CLASS_NAME,
   DEFAULT_ROI_PADDING,
   RETRY_ROI_PADDING,
+  PHARMA_LOCALIZER_CLASS_NAMES,
+  localizerLabelToFormat,
+  localizerLabelUsesSquareCrop,
+  localizerLabelUsesOpencvCascade,
+  resolveClassLabel,
 } from "./constants.js";
+export type { PharmaLocalizerClassName } from "./constants.js";
 export type {
   LocalizationRoi,
   ImageLocalization,

@@ -89,6 +89,7 @@ export { ensureOpenCv } from "./processing/opencvReady.js";
 export {
   cascadeZxingFormats,
   computeCascadeScaleFactor,
+  decodeCanvasWithZxing,
   mapZxingReadResult,
   toZxingFormats,
   fromZxingFormat,
@@ -126,4 +127,10 @@ export {
   DEFAULT_SCORE_THRESHOLD,
   DEFAULT_IOU_THRESHOLD,
   DEFAULT_ROI_PADDING,
+  PHARMA_LOCALIZER_CLASS_NAMES,
+  localizerLabelToFormat,
+  localizerLabelUsesSquareCrop,
+  localizerLabelUsesOpencvCascade,
+  resolveClassLabel,
 } from "./localization/index.js";
+export type { PharmaLocalizerClassName } from "./localization/index.js";

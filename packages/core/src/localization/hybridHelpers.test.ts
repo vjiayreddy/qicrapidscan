@@ -54,6 +54,18 @@ describe("paddedRoiRect", () => {
     expect(rect.x + rect.width / 2).toBeCloseTo(50, 0);
     expect(rect.y + rect.height / 2).toBeCloseTo(45, 0);
   });
+
+  it("pads thin linear Code128 crops on the short axis", () => {
+    const rect = paddedRoiRect(
+      { x: 90, y: 20, width: 8, height: 120 },
+      400,
+      400,
+      0.2,
+      { square: false, minPadPx: 4 },
+    );
+    expect(rect.width).toBeGreaterThanOrEqual(64);
+    expect(rect.height).toBeGreaterThan(120);
+  });
 });
 
 describe("findContainingRoiIndex", () => {

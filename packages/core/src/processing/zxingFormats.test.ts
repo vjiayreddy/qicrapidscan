@@ -20,10 +20,15 @@ describe("toZxingFormats / fromZxingFormat", () => {
 });
 
 describe("cascadeZxingFormats", () => {
-  it("prefers DataMatrix when enabled", () => {
+  it("prefers DataMatrix when multiple formats include it", () => {
     expect(
       cascadeZxingFormats(["QR_CODE", "DATA_MATRIX", "CODE_128"]),
     ).toEqual(["DataMatrix"]);
+  });
+
+  it("honors a single ROI-hinted format", () => {
+    expect(cascadeZxingFormats(["CODE_128"])).toEqual(["Code128"]);
+    expect(cascadeZxingFormats(["PDF_417"])).toEqual(["PDF417"]);
   });
 
   it("falls back to all formats when DataMatrix is disabled", () => {

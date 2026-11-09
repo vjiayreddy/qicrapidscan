@@ -16,6 +16,7 @@ import type {
 } from "@qicrapidscan/core";
 import {
   DEFAULT_ROI_PADDING,
+  localizerLabelUsesSquareCrop,
   paddedRoiRect,
 } from "@qicrapidscan/core";
 
@@ -44,8 +45,10 @@ function clamp(value: number, min: number, max: number) {
 }
 
 /**
- * Crop the same padded square the decoder used (`roi.crop`), falling back to
+ * Crop the same padded rect the decoder used (`roi.crop`), falling back to
  * recomputing pad when crop metadata is missing.
+ * Linear labels keep aspect (not forced square) so Code128 thumbs aren't
+ * crushed into a gray strip.
  */
 function cropRoiToDataUrl(
   image: HTMLImageElement,
@@ -57,17 +60,24 @@ function cropRoiToDataUrl(
   if (!iw || !ih || roi.width <= 0 || roi.height <= 0) return null;
 
   const padRatio = options.padRatio ?? DEFAULT_ROI_PADDING;
+  const square = localizerLabelUsesSquareCrop(roi.label);
   const rect =
     roi.crop && roi.crop.width >= 2 && roi.crop.height >= 2
       ? roi.crop
-      : paddedRoiRect(roi, iw, ih, padRatio, { square: true, minPadPx: 4 });
+      : paddedRoiRect(roi, iw, ih, padRatio, { square, minPadPx: 4 });
   const { x, y, width, height } = rect;
   if (width < 2 || height < 2) return null;
 
+  // Clamp to image bounds in case scaled crop metadata drifted.
+  const sx = Math.max(0, Math.min(Math.floor(x), iw - 1));
+  const sy = Math.max(0, Math.min(Math.floor(y), ih - 1));
+  const sw = Math.max(1, Math.min(Math.round(width), iw - sx));
+  const sh = Math.max(1, Math.min(Math.round(height), ih - sy));
+
   const maxEdge = options.maxEdge ?? 192;
-  const scale = Math.min(1, maxEdge / Math.max(width, height));
-  const outW = Math.max(1, Math.round(width * scale));
-  const outH = Math.max(1, Math.round(height * scale));
+  const scale = Math.min(1, maxEdge / Math.max(sw, sh));
+  const outW = Math.max(1, Math.round(sw * scale));
+  const outH = Math.max(1, Math.round(sh * scale));
 
   const canvas = document.createElement("canvas");
   canvas.width = outW;
@@ -79,7 +89,7 @@ function cropRoiToDataUrl(
   ctx.fillRect(0, 0, outW, outH);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(image, x, y, width, height, 0, 0, outW, outH);
+  ctx.drawImage(image, sx, sy, sw, sh, 0, 0, outW, outH);
   try {
     return canvas.toDataURL("image/jpeg", 0.92);
   } catch {
@@ -661,12 +671,13 @@ function UploadResultsDrawer({
         const next: Record<string, string> = {};
         failedRois.forEach((roi, index) => {
           const key = `fail-${index}-${roi.x}-${roi.y}`;
-          // Prefer OpenCV cascade preview (dewarp/CLAHE/adaptive) over raw crop.
+          // Prefer the raw YOLO crop (or recomputed pad). Cascade-miss
+          // previews are often washed-out gray and hide the barcode.
           const dataUrl =
             roi.previewDataUrl ??
             cropRoiToDataUrl(image, roi, {
               padRatio: DEFAULT_ROI_PADDING,
-              maxEdge: 192,
+              maxEdge: 256,
             });
           if (dataUrl) next[key] = dataUrl;
         });
@@ -779,7 +790,9 @@ function UploadResultsDrawer({
                       </div>
                       <div className="pg-upload-result__body">
                         <span className="pg-upload-result__format pg-upload-result__format--fail">
-                          Localized box
+                          {roi.label?.trim()
+                            ? `Localized ${roi.label}`
+                            : "Localized box"}
                           <span className="pg-upload-result__index">
                             #{index + 1}
                           </span>

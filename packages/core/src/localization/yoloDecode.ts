@@ -1,4 +1,5 @@
 import { mapBoxToSource, type LetterboxMeta } from "./letterbox.js";
+import { resolveClassLabel } from "./classNames.js";
 import type { LocalizationRoi } from "./types.js";
 
 export interface YoloCandidate {
@@ -7,11 +8,15 @@ export interface YoloCandidate {
   x2: number;
   y2: number;
   score: number;
+  /** Argmax class channel index (0 … nc-1). */
+  classId: number;
 }
 
 /**
  * Decode Ultralytics YOLO detect export `output0` shaped `[1, 4+nc, N]`
- * (channels-first). For the DataMatrix model: `[1, 5, 33600]` — xywh + 1 score.
+ * (channels-first).
+ * - Single-class DataMatrix: `[1, 5, 33600]` — xywh + 1 score
+ * - Pharma multi: `[1, 9, 33600]` — xywh + 5 class scores
  */
 export function decodeYoloOutput(
   data: Float32Array,
@@ -39,11 +44,15 @@ export function decodeYoloOutput(
 
   const candidates: YoloCandidate[] = [];
   for (let i = 0; i < numPreds; i += 1) {
-    // Single-class model: score is channel 4. Multi-class: max of class channels.
+    // Single-class: score is channel 4. Multi-class: argmax of class channels.
     let score = 0;
+    let classId = 0;
     for (let c = 4; c < channels; c += 1) {
       const v = data[c * numPreds + i]!;
-      if (v > score) score = v;
+      if (v > score) {
+        score = v;
+        classId = c - 4;
+      }
     }
     if (score < scoreThreshold) continue;
 
@@ -57,6 +66,7 @@ export function decodeYoloOutput(
       x2: cx + w / 2,
       y2: cy + h / 2,
       score,
+      classId,
     });
   }
 
@@ -96,14 +106,16 @@ export function nms(
 export function candidatesToRois(
   candidates: YoloCandidate[],
   meta: LetterboxMeta,
-  className: string,
+  classNames?: readonly string[],
+  fallbackClassName = "item",
 ): LocalizationRoi[] {
   return candidates.map((cand) => {
     const box = mapBoxToSource(cand, meta);
     return {
       ...box,
       score: cand.score,
-      label: className,
+      label: resolveClassLabel(cand.classId, classNames, fallbackClassName),
+      classId: cand.classId,
     };
   });
 }

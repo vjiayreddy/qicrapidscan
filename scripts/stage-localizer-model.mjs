@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Stage YOLO DataMatrix ONNX + onnxruntime-web WASM into the playground public/
- * folder for hybrid image-upload localization.
+ * Stage YOLO pharma multi-barcode ONNX + onnxruntime-web WASM into the
+ * playground public/ folder for hybrid image-upload localization.
  *
  * Usage (repo root):
  *   node scripts/stage-localizer-model.mjs
@@ -15,7 +15,9 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MODEL_NAME = "datamatrix-model.onnx";
+const MODEL_NAME = "pharma_multibarcodes.onnx";
+/** Kept as optional fallback for single-class DataMatrix experiments. */
+const LEGACY_MODEL_NAME = "datamatrix-model.onnx";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const publicRoot = join(root, "apps/playground/public");
 const modelDestDir = join(publicRoot, "models");
@@ -46,6 +48,24 @@ if (modelSource !== modelDest) {
 console.log(
   `Staged model → ${modelDest} (${statSync(modelDest).size} bytes)`,
 );
+console.log(
+  "Classes: Code128, PDF417, QRCode, UPCA, datamatrix (input 1280×1280)",
+);
+
+// Preserve legacy single-class weights if present (do not fail if missing).
+const legacyCandidates = [
+  join("/Users/vijay/Downloads", LEGACY_MODEL_NAME),
+  join(root, "models", LEGACY_MODEL_NAME),
+  join(modelDestDir, LEGACY_MODEL_NAME),
+];
+const legacySource = legacyCandidates.find((path) => existsSync(path));
+if (legacySource) {
+  const legacyDest = join(modelDestDir, LEGACY_MODEL_NAME);
+  if (legacySource !== legacyDest) {
+    cpSync(legacySource, legacyDest);
+  }
+  console.log(`Also kept legacy model → ${legacyDest}`);
+}
 
 const require = createRequire(import.meta.url);
 let ortDist;

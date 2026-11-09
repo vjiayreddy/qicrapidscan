@@ -61,14 +61,18 @@ export function fromZxingFormat(
 }
 
 /**
- * Prefer DataMatrix-only when that format is enabled — YOLO crops are almost
- * always DataMatrix for this product path. Otherwise pass the full enabled set.
+ * Formats for the OpenCV/zxing cascade.
+ * When a single ROI-hinted format is passed, use it. When multiple formats
+ * include DataMatrix (legacy full-set callers), prefer DataMatrix-only.
  */
 export function cascadeZxingFormats(
   formats?: readonly BarcodeFormat[],
 ): ReadInputBarcodeFormat[] {
   if (!formats || formats.length === 0) {
     return ["DataMatrix"];
+  }
+  if (formats.length === 1) {
+    return toZxingFormats(formats);
   }
   if (formats.includes("DATA_MATRIX")) {
     return ["DataMatrix"];
@@ -91,11 +95,30 @@ export function mapZxingReadResult(
   const offsetX = options.offsetX ?? 0;
   const offsetY = options.offsetY ?? 0;
 
+  const position = result.position;
+  if (
+    !position?.topLeft ||
+    !position.topRight ||
+    !position.bottomRight ||
+    !position.bottomLeft
+  ) {
+    return {
+      id: `${format}:${result.text}`,
+      text: result.text,
+      format,
+      rawBytes:
+        result.bytes && result.bytes.length > 0 ? result.bytes : undefined,
+      boundingBox: { x: offsetX, y: offsetY, width: 1, height: 1 },
+      points: [],
+      timestamp: Date.now(),
+    };
+  }
+
   const points = [
-    result.position.topLeft,
-    result.position.topRight,
-    result.position.bottomRight,
-    result.position.bottomLeft,
+    position.topLeft,
+    position.topRight,
+    position.bottomRight,
+    position.bottomLeft,
   ].map((point) => ({
     x: point.x * scaleX + offsetX,
     y: point.y * scaleY + offsetY,
@@ -108,11 +131,12 @@ export function mapZxingReadResult(
   const maxX = Math.max(...xs);
   const maxY = Math.max(...ys);
 
+  const bytes = result.bytes;
   return {
     id: `${format}:${result.text}`,
     text: result.text,
     format,
-    rawBytes: result.bytes.length > 0 ? result.bytes : undefined,
+    rawBytes: bytes && bytes.length > 0 ? bytes : undefined,
     boundingBox: {
       x: minX,
       y: minY,
@@ -139,4 +163,83 @@ export function computeCascadeScaleFactor(
   if (edge <= 0) return 1;
   const raw = Math.max(1, minTargetSize / edge);
   return Math.min(Math.max(1, maxScale), raw);
+}
+
+/**
+ * Direct zxing-wasm decode on a canvas (tryHarder + rotate + invert).
+ * Upscales thin ROI crops; downscales huge full-frames for reliability.
+ */
+export async function decodeCanvasWithZxing(
+  canvas: HTMLCanvasElement,
+  formats?: readonly BarcodeFormat[],
+): Promise<BarcodeResult[]> {
+  if (typeof document === "undefined") return [];
+  if (canvas.width < 2 || canvas.height < 2) return [];
+
+  const { readBarcodesFromImageData } = await import("zxing-wasm/reader");
+
+  const shortEdge = Math.min(canvas.width, canvas.height);
+  const longEdge = Math.max(canvas.width, canvas.height);
+  let scale = 1;
+  if (shortEdge > 0 && shortEdge < 128) {
+    scale = Math.min(5, 128 / shortEdge);
+  } else if (longEdge > 1600) {
+    // Full-frame shipping photos: keep ZXing in a workable budget.
+    scale = 1600 / longEdge;
+  }
+
+  let source = canvas;
+  let owned: HTMLCanvasElement | null = null;
+  if (Math.abs(scale - 1) > 0.01) {
+    owned = document.createElement("canvas");
+    owned.width = Math.max(1, Math.round(canvas.width * scale));
+    owned.height = Math.max(1, Math.round(canvas.height * scale));
+    const octx = owned.getContext("2d");
+    if (!octx) return [];
+    octx.imageSmoothingEnabled = scale > 1;
+    octx.imageSmoothingQuality = "high";
+    octx.drawImage(canvas, 0, 0, owned.width, owned.height);
+    source = owned;
+  }
+
+  try {
+    const sctx =
+      source.getContext("2d", { willReadFrequently: true }) ??
+      source.getContext("2d");
+    if (!sctx) return [];
+    const imageData = sctx.getImageData(0, 0, source.width, source.height);
+    const zxingFormats =
+      formats && formats.length > 0 ? toZxingFormats(formats) : undefined;
+    const reads =
+      (await readBarcodesFromImageData(imageData, {
+        formats: zxingFormats,
+        tryHarder: true,
+        tryRotate: true,
+        tryInvert: true,
+        tryDownscale: true,
+        tryDenoise: true,
+        maxNumberOfSymbols: 16,
+      })) ?? [];
+
+    const mapped: BarcodeResult[] = [];
+    const seen = new Set<string>();
+    const invScale = 1 / scale;
+    for (const read of Array.isArray(reads) ? reads : []) {
+      const result = mapZxingReadResult(read, {
+        scaleX: invScale,
+        scaleY: invScale,
+      });
+      if (!result) continue;
+      const key = `${result.format}:${result.text}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      mapped.push(result);
+    }
+    return mapped;
+  } finally {
+    if (owned) {
+      owned.width = 0;
+      owned.height = 0;
+    }
+  }
 }

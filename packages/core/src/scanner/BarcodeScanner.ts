@@ -330,6 +330,10 @@ export class BarcodeScanner {
             iouThreshold: this.resolved.localization.iouThreshold,
             inputSize: this.resolved.localization.inputSize,
             className: this.resolved.localization.className,
+            classNames:
+              this.resolved.localization.classNames.length > 0
+                ? this.resolved.localization.classNames
+                : undefined,
           });
           this.localizer = localizer;
           this.localizerInitError = null;
