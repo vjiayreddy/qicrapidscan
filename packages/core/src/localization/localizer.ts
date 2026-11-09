@@ -50,6 +50,7 @@ class OnnxBarcodeLocalizerImpl implements OnnxBarcodeLocalizer {
       iouThreshold: options.iouThreshold ?? DEFAULT_IOU_THRESHOLD,
       inputSize: options.inputSize ?? DEFAULT_INPUT_SIZE,
       className: options.className ?? DEFAULT_CLASS_NAME,
+      classNames: options.classNames,
     };
 
     try {
@@ -112,6 +113,7 @@ class OnnxBarcodeLocalizerImpl implements OnnxBarcodeLocalizer {
     const rois = candidatesToRois(
       kept,
       meta,
+      this.options.classNames,
       this.options.className ?? DEFAULT_CLASS_NAME,
     );
 

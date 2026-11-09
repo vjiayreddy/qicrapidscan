@@ -76,18 +76,28 @@ function mapDetected(
   if (!format) return null;
 
   const text = detected.rawValue;
-  const points = detected.cornerPoints.map((point) => ({
+  const cornerPoints = detected.cornerPoints ?? [];
+  const points = cornerPoints.map((point) => ({
     x: point.x * scaleX,
     y: point.y * scaleY,
   }));
 
   const box = detected.boundingBox;
-  const boundingBox = {
-    x: box.x * scaleX,
-    y: box.y * scaleY,
-    width: box.width * scaleX,
-    height: box.height * scaleY,
-  };
+  const boundingBox = box
+    ? {
+        x: box.x * scaleX,
+        y: box.y * scaleY,
+        width: box.width * scaleX,
+        height: box.height * scaleY,
+      }
+    : points.length > 0
+      ? {
+          x: Math.min(...points.map((p) => p.x)),
+          y: Math.min(...points.map((p) => p.y)),
+          width: Math.max(1, Math.max(...points.map((p) => p.x)) - Math.min(...points.map((p) => p.x))),
+          height: Math.max(1, Math.max(...points.map((p) => p.y)) - Math.min(...points.map((p) => p.y))),
+        }
+      : { x: 0, y: 0, width: 1, height: 1 };
 
   return {
     id: createResultId(format, text),
@@ -123,6 +133,10 @@ export class ZXingDecoder implements DecoderAdapter {
   setFormats(formats: BarcodeFormat[]): void {
     this.formats = formats.length > 0 ? [...formats] : [...DEFAULT_FORMATS];
     this.detector = this.createDetector();
+  }
+
+  getFormats(): readonly BarcodeFormat[] {
+    return this.formats;
   }
 
   setTryHarder(_value: boolean): void {

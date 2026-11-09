@@ -20,6 +20,7 @@ export interface ResolvedLocalizationOptions {
   roiPadding: number;
   maxRois: number;
   className: string;
+  classNames: readonly string[];
   openCvScriptUrl: string;
 }
 
@@ -192,6 +193,9 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
         options.localization?.maxRois ??
         Math.max(32, (options.detection?.maxResults ?? 10) * 4),
       className: options.localization?.className ?? DEFAULT_CLASS_NAME,
+      classNames: options.localization?.classNames
+        ? [...options.localization.classNames]
+        : [],
       openCvScriptUrl: options.localization?.openCvScriptUrl?.trim() ?? "",
     },
   };

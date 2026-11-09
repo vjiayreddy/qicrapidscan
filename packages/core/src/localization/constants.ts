@@ -1,4 +1,4 @@
-/** Default YOLO26 export input edge (matches datamatrix-model.onnx imgsz). */
+/** Default YOLO26 export input edge (matches pharma / DataMatrix imgsz). */
 export const DEFAULT_INPUT_SIZE = 1280;
 
 export const DEFAULT_SCORE_THRESHOLD = 0.25;
@@ -6,6 +6,15 @@ export const DEFAULT_SCORE_THRESHOLD = 0.25;
 export const DEFAULT_IOU_THRESHOLD = 0.45;
 
 export const DEFAULT_CLASS_NAME = "item";
+
+export {
+  PHARMA_LOCALIZER_CLASS_NAMES,
+  localizerLabelToFormat,
+  localizerLabelUsesSquareCrop,
+  localizerLabelUsesOpencvCascade,
+  resolveClassLabel,
+} from "./classNames.js";
+export type { PharmaLocalizerClassName } from "./classNames.js";
 
 /**
  * Extra padding around the YOLO box before decode.

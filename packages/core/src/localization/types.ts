@@ -5,16 +5,18 @@ export interface LocalizationRoi {
   width: number;
   height: number;
   score?: number;
+  /** YOLO class label (e.g. Code128, datamatrix). */
   label?: string;
+  /** YOLO class channel index when multi-class. */
+  classId?: number;
   /**
    * Actual padded square crop used for decode (source pixels).
    * Prefer this over raw x/y/width/height when rendering failed thumbs.
    */
   crop?: { x: number; y: number; width: number; height: number };
   /**
-   * OpenCV cascade diagnostic preview (CLAHE/sharpen/adaptive, after
-   * straighten/dewarp when available). Prefer for failed ROI thumbs —
-   * raw crops still look curved even when warps were attempted.
+   * Decode thumb: raw YOLO crop on miss; cascade enhancement on hit.
+   * Failed thumbs should show the raw crop (not washed cascade miss).
    */
   previewDataUrl?: string;
   /** True when ZXing decoded at least one code inside this ROI crop. */
@@ -59,8 +61,16 @@ export interface OnnxLocalizerInitOptions {
   iouThreshold?: number;
   /** Model input edge length (default 1280 for YOLO26 export). */
   inputSize?: number;
-  /** Class label for detections (default "item"). */
+  /**
+   * Fallback label when classNames is omitted / single-class models.
+   * Default "item".
+   */
   className?: string;
+  /**
+   * Ordered YOLO class names matching the model head (channel 4…).
+   * Pharma multi-barcode model: Code128, PDF417, QRCode, UPCA, datamatrix.
+   */
+  classNames?: readonly string[];
 }
 
 export interface OnnxBarcodeLocalizer {
@@ -81,8 +91,14 @@ export interface LocalizationOptions {
   /** Extra padding around each ROI as a fraction of box size. Default 0.1. */
   roiPadding?: number;
   maxRois?: number;
-  /** Detection class label (default "item"). */
+  /**
+   * Fallback detection class label for single-class models (default "item").
+   */
   className?: string;
+  /**
+   * Ordered YOLO class names for multi-class models (e.g. pharma_multibarcodes).
+   */
+  classNames?: readonly string[];
   /**
    * URL to a staged `opencv.js` for the ROI recovery cascade.
    * Preferred in Next.js apps so Webpack never bundles `@techstark/opencv-js`

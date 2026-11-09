@@ -19,6 +19,8 @@ export interface DecodeRasterInput {
 export interface DecoderAdapter {
   readonly name: string;
   setFormats(formats: BarcodeFormat[]): void;
+  /** Optional — current enabled formats (for temporary ROI narrowing). */
+  getFormats?(): readonly BarcodeFormat[];
   /** Optional — thorough decode (engine-dependent). */
   setTryHarder?(value: boolean): void;
   /** Optional — inverted luminance attempts (engine-dependent). */
