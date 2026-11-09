@@ -133,29 +133,52 @@ export function dedupeLocalizationRois(
   });
 }
 
+export interface PaddedRoiRectOptions {
+  /**
+   * Force a square crop centered on the ROI (DataMatrix default).
+   * Prevents tall/narrow AABB crops from clipping tilted finders.
+   */
+  square?: boolean;
+  /** Minimum padding on each side in source pixels. Default 4. */
+  minPadPx?: number;
+}
+
 /** Axis-aligned crop rect with relative padding, clamped to the source. */
 export function paddedRoiRect(
   roi: { x: number; y: number; width: number; height: number },
   sourceWidth: number,
   sourceHeight: number,
   padRatio: number,
+  options: PaddedRoiRectOptions = {},
 ): { x: number; y: number; width: number; height: number } {
-  const padX = roi.width * padRatio;
-  const padY = roi.height * padRatio;
-  let x1 = Math.floor(roi.x - padX);
-  let y1 = Math.floor(roi.y - padY);
-  let x2 = Math.ceil(roi.x + roi.width + padX);
-  let y2 = Math.ceil(roi.y + roi.height + padY);
+  const square = options.square ?? true;
+  const minPadPx = Math.max(0, options.minPadPx ?? 4);
+  const side = Math.max(roi.width, roi.height);
+  const pad = Math.max(side * padRatio, minPadPx);
 
-  x1 = Math.max(0, Math.min(sourceWidth - 1, x1));
-  y1 = Math.max(0, Math.min(sourceHeight - 1, y1));
-  x2 = Math.max(x1 + 1, Math.min(sourceWidth, x2));
-  y2 = Math.max(y1 + 1, Math.min(sourceHeight, y2));
+  let width = roi.width + pad * 2;
+  let height = roi.height + pad * 2;
+  if (square) {
+    const squareSide = Math.max(width, height);
+    width = squareSide;
+    height = squareSide;
+  }
+
+  width = Math.min(width, sourceWidth);
+  height = Math.min(height, sourceHeight);
+
+  const centerX = roi.x + roi.width / 2;
+  const centerY = roi.y + roi.height / 2;
+  let x1 = Math.floor(centerX - width / 2);
+  let y1 = Math.floor(centerY - height / 2);
+
+  x1 = Math.max(0, Math.min(x1, sourceWidth - width));
+  y1 = Math.max(0, Math.min(y1, sourceHeight - height));
 
   return {
     x: x1,
     y: y1,
-    width: x2 - x1,
-    height: y2 - y1,
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
   };
 }

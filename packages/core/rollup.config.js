@@ -8,7 +8,9 @@ const external = (id) =>
   id === "barcode-detector" ||
   id.startsWith("barcode-detector/") ||
   id === "zxing-wasm" ||
-  id.startsWith("zxing-wasm/");
+  id.startsWith("zxing-wasm/") ||
+  id === "@techstark/opencv-js" ||
+  id.startsWith("@techstark/opencv-js/");
 
 const sharedPlugins = [
   resolve({ browser: true, preferBuiltins: false }),
@@ -43,9 +45,11 @@ const config = [
     ],
     plugins: sharedPlugins,
   },
-  // CDN browser ESM (barcode-detector bundled; WASM fetched at runtime)
+  // CDN browser ESM (barcode-detector bundled; OpenCV left external / soft-skip)
   {
     input: "src/cdn.ts",
+    external: (id) =>
+      id === "@techstark/opencv-js" || id.startsWith("@techstark/opencv-js/"),
     output: {
       file: "dist/qicrapidscan.esm.js",
       format: "esm",
@@ -57,6 +61,8 @@ const config = [
   // CDN IIFE standalone (barcode-detector bundled, minified)
   {
     input: "src/cdn.ts",
+    external: (id) =>
+      id === "@techstark/opencv-js" || id.startsWith("@techstark/opencv-js/"),
     output: {
       file: "dist/qicrapidscan.min.js",
       format: "iife",
@@ -70,6 +76,8 @@ const config = [
   // Unminified IIFE for debugging CDN consumers
   {
     input: "src/cdn.ts",
+    external: (id) =>
+      id === "@techstark/opencv-js" || id.startsWith("@techstark/opencv-js/"),
     output: {
       file: "dist/qicrapidscan.js",
       format: "iife",

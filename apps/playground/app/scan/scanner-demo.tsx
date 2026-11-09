@@ -10,6 +10,7 @@ import type {
 import {
   ALL_SUPPORTED_FORMATS,
   annotateBarcodeImage,
+  ensureOpenCv,
   ONE_D_FORMATS,
   TWO_D_FORMATS,
 } from "@qicrapidscan/core";
@@ -77,10 +78,12 @@ const UPLOAD_LOCALIZATION = {
   enabled: true,
   modelUrl: "/models/datamatrix-model.onnx",
   ortWasmBaseUrl: "/assets/ort/",
+  /** Staged by `pnpm stage:localizer` — avoids Next bundling opencv-js (`fs`). */
+  openCvScriptUrl: "/assets/opencv/opencv.js",
   inputSize: 1280,
   scoreThreshold: 0.25,
   iouThreshold: 0.45,
-  roiPadding: 0.18,
+  roiPadding: 0.1,
 } as const;
 
 const FINDER_ROI: RoiRect = {
@@ -242,6 +245,12 @@ export function ScannerDemo() {
     },
     [showOverlay],
   );
+
+  // Warm OpenCV from the staged public asset so hybrid ROI cascade never
+  // triggers a Webpack resolve of `@techstark/opencv-js` (Node `fs`).
+  useEffect(() => {
+    void ensureOpenCv({ scriptUrl: UPLOAD_LOCALIZATION.openCvScriptUrl });
+  }, []);
 
   useEffect(() => {
     setUploadResults([]);

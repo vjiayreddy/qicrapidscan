@@ -56,6 +56,8 @@ export interface HybridScanOptions {
   localizer: OnnxBarcodeLocalizer;
   roiPadding?: number;
   maxRois?: number;
+  /** Staged opencv.js URL for the ROI cascade. */
+  openCvScriptUrl?: string;
 }
 
 function scaleRoisToSource(
@@ -74,6 +76,14 @@ function scaleRoisToSource(
     y: roi.y * sy,
     width: roi.width * sx,
     height: roi.height * sy,
+    crop: roi.crop
+      ? {
+          x: roi.crop.x * sx,
+          y: roi.crop.y * sy,
+          width: roi.crop.width * sx,
+          height: roi.crop.height * sy,
+        }
+      : undefined,
   }));
 }
 
@@ -131,6 +141,9 @@ export class ImageScanner {
         imageEnhancement: this.options.imageEnhancement ?? true,
         rotationRetry: this.options.rotationRetry ?? true,
         tryHarder: this.options.tryHarder ?? true,
+        opencvCascade: true,
+        formats: this.options.formats,
+        openCvScriptUrl: hybrid.openCvScriptUrl,
         fullFrameDecode: async () => {
           const decoded = await this.decodeOnCanvas(sized.canvas);
           return decoded.results;

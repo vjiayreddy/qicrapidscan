@@ -75,6 +75,39 @@ for (const file of readdirSync(ortDist)) {
   copied += 1;
 }
 console.log(`Copied ${copied} onnxruntime-web assets → ${ortDestDir}`);
+
+// Stage OpenCV.js for the ROI recovery cascade (avoid Next/Webpack bundling
+// the Node-oriented @techstark/opencv-js build that requires `fs`).
+const opencvDestDir = join(publicRoot, "assets/opencv");
+mkdirSync(opencvDestDir, { recursive: true });
+const opencvRequirePaths = [
+  join(root, "packages/core"),
+  root,
+];
+let opencvStaged = false;
+for (const from of opencvRequirePaths) {
+  try {
+    const localRequire = createRequire(join(from, "package.json"));
+    const opencvEntry = localRequire.resolve("@techstark/opencv-js");
+    const opencvJs = join(dirname(opencvEntry), "opencv.js");
+    const opencvSource = existsSync(opencvJs) ? opencvJs : opencvEntry;
+    const opencvDest = join(opencvDestDir, "opencv.js");
+    cpSync(opencvSource, opencvDest);
+    console.log(
+      `Staged OpenCV.js → ${opencvDest} (${statSync(opencvDest).size} bytes)`,
+    );
+    opencvStaged = true;
+    break;
+  } catch {
+    // try next path
+  }
+}
+if (!opencvStaged) {
+  console.warn(
+    "⚠ @techstark/opencv-js not found — ROI cascade will soft-skip until it is installed/staged.",
+  );
+}
+
 console.log(
   "Reminder: AGPL Ultralytics weights are for local playground testing only.",
 );

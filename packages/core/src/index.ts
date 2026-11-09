@@ -67,6 +67,32 @@ export type {
   DecodeRotationDegrees,
   OwnedCanvas,
 } from "./processing/decodePipeline.js";
+export {
+  decodeBarcodeWithCascade,
+  addWhiteQuietZone,
+  grayMatToJpegDataUrl,
+  tryZXingDecode,
+  mapCascadeGeometryToTile,
+} from "./processing/opencvCascade.js";
+export type {
+  CascadeDecodeOptions,
+  CascadeDecodeHit,
+  CascadeDecodeMeta,
+  CascadeDecodeOutcome,
+  CascadeGeometry,
+} from "./processing/opencvCascade.js";
+export {
+  straightenBarcodeGray,
+  rectifyDataMatrixSymbol,
+} from "./processing/opencvStraighten.js";
+export { ensureOpenCv } from "./processing/opencvReady.js";
+export {
+  cascadeZxingFormats,
+  computeCascadeScaleFactor,
+  mapZxingReadResult,
+  toZxingFormats,
+  fromZxingFormat,
+} from "./processing/zxingFormats.js";
 export type { DuplicateFilterMode } from "./processing/DuplicateFilter.js";
 export {
   toCornerPoints,
@@ -95,6 +121,7 @@ export {
   mapBoxToSource,
   withRoiDecodeStatus,
   dedupeLocalizationRois,
+  paddedRoiRect,
   DEFAULT_INPUT_SIZE,
   DEFAULT_SCORE_THRESHOLD,
   DEFAULT_IOU_THRESHOLD,

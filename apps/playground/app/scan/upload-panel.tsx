@@ -14,6 +14,10 @@ import type {
   BarcodeResult,
   LocalizationRoi,
 } from "@qicrapidscan/core";
+import {
+  DEFAULT_ROI_PADDING,
+  paddedRoiRect,
+} from "@qicrapidscan/core";
 
 const FORMAT_LABELS: Partial<Record<BarcodeFormat, string>> = {
   EAN_8: "EAN-8",
@@ -37,6 +41,62 @@ const ZOOM_STEP = 0.25;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Crop the same padded square the decoder used (`roi.crop`), falling back to
+ * recomputing pad when crop metadata is missing.
+ */
+function cropRoiToDataUrl(
+  image: HTMLImageElement,
+  roi: LocalizationRoi,
+  options: { maxEdge?: number; padRatio?: number } = {},
+): string | null {
+  const iw = image.naturalWidth || image.width;
+  const ih = image.naturalHeight || image.height;
+  if (!iw || !ih || roi.width <= 0 || roi.height <= 0) return null;
+
+  const padRatio = options.padRatio ?? DEFAULT_ROI_PADDING;
+  const rect =
+    roi.crop && roi.crop.width >= 2 && roi.crop.height >= 2
+      ? roi.crop
+      : paddedRoiRect(roi, iw, ih, padRatio, { square: true, minPadPx: 4 });
+  const { x, y, width, height } = rect;
+  if (width < 2 || height < 2) return null;
+
+  const maxEdge = options.maxEdge ?? 192;
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const outW = Math.max(1, Math.round(width * scale));
+  const outH = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  // White stage so quiet-zone / pad margin is obvious in the thumb.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, outW, outH);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, x, y, width, height, 0, 0, outW, outH);
+  try {
+    return canvas.toDataURL("image/jpeg", 0.92);
+  } catch {
+    return null;
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
+function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load crop source image."));
+    img.src = url;
+  });
 }
 
 /** object-fit: contain rect inside a viewport. */
@@ -415,11 +475,15 @@ export function UploadPanel(props: UploadPanelProps) {
                           const ok =
                             roi.decoded === true &&
                             (roi.texts?.length ?? 0) > 0;
-                          const markSize = Math.max(18, strokeWidth * 10);
-                          const markPad = Math.max(2, strokeWidth);
-                          const markCx =
-                            roi.x + roi.width - markSize / 2 - markPad;
-                          const markCy = roi.y + markSize / 2 + markPad;
+                          // Translucent box fill + centered ✓/✗ (no solid circle badge).
+                          const boxSide = Math.min(
+                            Math.max(1, roi.width),
+                            Math.max(1, roi.height),
+                          );
+                          const markSize = Math.max(12, boxSide * 0.42);
+                          const markCx = roi.x + roi.width / 2;
+                          const markCy = roi.y + roi.height / 2;
+                          const markStroke = Math.max(2, markSize * 0.16);
                           return (
                             <g key={`loc-${index}-${roi.x}-${roi.y}`}>
                               <rect
@@ -434,33 +498,23 @@ export function UploadPanel(props: UploadPanelProps) {
                                 }
                                 strokeWidth={strokeWidth}
                               />
-                              <circle
-                                cx={markCx}
-                                cy={markCy}
-                                r={markSize / 2}
-                                className={
-                                  ok
-                                    ? "pg-upload-result__mark-bg pg-upload-result__mark-bg--ok"
-                                    : "pg-upload-result__mark-bg pg-upload-result__mark-bg--fail"
-                                }
-                              />
                               {ok ? (
                                 <path
                                   className="pg-upload-result__mark"
-                                  d={`M ${markCx - markSize * 0.22} ${markCy}
-                                    L ${markCx - markSize * 0.05} ${markCy + markSize * 0.2}
-                                    L ${markCx + markSize * 0.25} ${markCy - markSize * 0.2}`}
-                                  strokeWidth={strokeWidth * 0.9}
+                                  d={`M ${markCx - markSize * 0.28} ${markCy + markSize * 0.02}
+                                    L ${markCx - markSize * 0.06} ${markCy + markSize * 0.24}
+                                    L ${markCx + markSize * 0.3} ${markCy - markSize * 0.22}`}
+                                  strokeWidth={markStroke}
                                   fill="none"
                                 />
                               ) : (
                                 <path
                                   className="pg-upload-result__mark"
-                                  d={`M ${markCx - markSize * 0.18} ${markCy - markSize * 0.18}
-                                    L ${markCx + markSize * 0.18} ${markCy + markSize * 0.18}
-                                    M ${markCx + markSize * 0.18} ${markCy - markSize * 0.18}
-                                    L ${markCx - markSize * 0.18} ${markCy + markSize * 0.18}`}
-                                  strokeWidth={strokeWidth * 0.9}
+                                  d={`M ${markCx - markSize * 0.22} ${markCy - markSize * 0.22}
+                                    L ${markCx + markSize * 0.22} ${markCy + markSize * 0.22}
+                                    M ${markCx + markSize * 0.22} ${markCy - markSize * 0.22}
+                                    L ${markCx - markSize * 0.22} ${markCy + markSize * 0.22}`}
+                                  strokeWidth={markStroke}
                                   fill="none"
                                 />
                               )}
@@ -567,6 +621,7 @@ export function UploadPanel(props: UploadPanelProps) {
         <UploadResultsDrawer
           results={results}
           failedRois={failedRois}
+          previewUrl={previewUrl}
           decodedCount={
             hasLocalization ? decodedRois.length : results.length
           }
@@ -580,6 +635,7 @@ export function UploadPanel(props: UploadPanelProps) {
 type UploadResultsDrawerProps = {
   results: BarcodeResult[];
   failedRois: LocalizationRoi[];
+  previewUrl: string | null;
   decodedCount: number;
   onClose: () => void;
 };
@@ -587,9 +643,44 @@ type UploadResultsDrawerProps = {
 function UploadResultsDrawer({
   results,
   failedRois,
+  previewUrl,
   decodedCount,
   onClose,
 }: UploadResultsDrawerProps) {
+  const [failedCrops, setFailedCrops] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailedCrops({});
+    if (!previewUrl || failedRois.length === 0) return;
+
+    void (async () => {
+      try {
+        const image = await loadImageFromUrl(previewUrl);
+        if (cancelled) return;
+        const next: Record<string, string> = {};
+        failedRois.forEach((roi, index) => {
+          const key = `fail-${index}-${roi.x}-${roi.y}`;
+          // Prefer OpenCV cascade preview (dewarp/CLAHE/adaptive) over raw crop.
+          const dataUrl =
+            roi.previewDataUrl ??
+            cropRoiToDataUrl(image, roi, {
+              padRatio: DEFAULT_ROI_PADDING,
+              maxEdge: 192,
+            });
+          if (dataUrl) next[key] = dataUrl;
+        });
+        if (!cancelled) setFailedCrops(next);
+      } catch {
+        if (!cancelled) setFailedCrops({});
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewUrl, failedRois]);
+
   return (
     <div className="pg-upload-results-drawer" role="dialog" aria-modal="true">
       <button
@@ -667,33 +758,42 @@ function UploadResultsDrawer({
               </p>
             ) : (
               <ul className="pg-upload-result__list">
-                {failedRois.map((roi, index) => (
-                  <li
-                    key={`fail-${index}-${roi.x}-${roi.y}`}
-                    className="pg-upload-result__item pg-upload-result__item--fail"
-                  >
-                    <div
-                      className="pg-upload-result__thumb pg-upload-result__thumb--fail"
-                      aria-hidden
+                {failedRois.map((roi, index) => {
+                  const key = `fail-${index}-${roi.x}-${roi.y}`;
+                  const cropUrl = failedCrops[key];
+                  return (
+                    <li
+                      key={key}
+                      className="pg-upload-result__item pg-upload-result__item--fail"
                     >
-                      <FailMarkIcon />
-                    </div>
-                    <div className="pg-upload-result__body">
-                      <span className="pg-upload-result__format pg-upload-result__format--fail">
-                        Localized box
-                        <span className="pg-upload-result__index">
-                          #{index + 1}
+                      <div
+                        className="pg-upload-result__thumb pg-upload-result__thumb--fail"
+                        aria-hidden
+                      >
+                        {cropUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={cropUrl} alt="" />
+                        ) : (
+                          <FailMarkIcon />
+                        )}
+                      </div>
+                      <div className="pg-upload-result__body">
+                        <span className="pg-upload-result__format pg-upload-result__format--fail">
+                          Localized box
+                          <span className="pg-upload-result__index">
+                            #{index + 1}
+                          </span>
                         </span>
-                      </span>
-                      <span className="pg-upload-result__text">
-                        Detected but not decoded
-                        {typeof roi.score === "number"
-                          ? ` · score ${(roi.score * 100).toFixed(0)}%`
-                          : ""}
-                      </span>
-                    </div>
-                  </li>
-                ))}
+                        <span className="pg-upload-result__text">
+                          Detected but not decoded
+                          {typeof roi.score === "number"
+                            ? ` · score ${(roi.score * 100).toFixed(0)}%`
+                            : ""}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
