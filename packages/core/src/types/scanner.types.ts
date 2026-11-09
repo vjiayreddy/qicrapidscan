@@ -1,4 +1,5 @@
 import type { BarcodeFormat } from "./barcode.types.js";
+import type { LocalizationOptions } from "../localization/types.js";
 
 export interface MultiDetectionOptions {
   multiple?: boolean;
@@ -81,4 +82,10 @@ export interface BarcodeScannerOptions {
    * `cropDataUrl` thumbnail of the barcode region. Default false.
    */
   captureCrop?: boolean;
+  /**
+   * Opt-in ONNX YOLO localize→crop→decode for still-image `scanImage()` only.
+   * Live camera is unchanged. Soft-fails to tiling/decode-only when the model
+   * or ORT runtime is unavailable.
+   */
+  localization?: LocalizationOptions;
 }

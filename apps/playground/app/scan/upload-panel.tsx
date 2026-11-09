@@ -1,7 +1,19 @@
 "use client";
 
-import { useCallback, useRef, useState, type DragEvent } from "react";
-import type { BarcodeFormat, BarcodeResult } from "@qicrapidscan/core";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import type {
+  BarcodeFormat,
+  BarcodeResult,
+  LocalizationRoi,
+} from "@qicrapidscan/core";
 
 const FORMAT_LABELS: Partial<Record<BarcodeFormat, string>> = {
   EAN_8: "EAN-8",
@@ -19,6 +31,35 @@ const FORMAT_LABELS: Partial<Record<BarcodeFormat, string>> = {
   AZTEC: "Aztec",
 };
 
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.25;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** object-fit: contain rect inside a viewport. */
+function containRect(
+  vw: number,
+  vh: number,
+  iw: number,
+  ih: number,
+): { left: number; top: number; width: number; height: number } {
+  if (vw <= 0 || vh <= 0 || iw <= 0 || ih <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  const scale = Math.min(vw / iw, vh / ih);
+  const width = iw * scale;
+  const height = ih * scale;
+  return {
+    left: (vw - width) / 2,
+    top: (vh - height) / 2,
+    width,
+    height,
+  };
+}
+
 type UploadPanelProps = {
   open: boolean;
   onClose: () => void;
@@ -28,6 +69,9 @@ type UploadPanelProps = {
   /** Annotated result image (source + baked orange landmarks). Preferred when set. */
   resultImageUrl?: string | null;
   results: BarcodeResult[];
+  /** YOLO localization ROIs with per-box decode status. */
+  localizationRois?: LocalizationRoi[];
+  localizationLabel?: string | null;
   onFile: (file: File | null) => void;
   onClear: () => void;
   backAriaLabel?: string;
@@ -45,6 +89,8 @@ export function UploadPanel(props: UploadPanelProps) {
     previewUrl,
     resultImageUrl = null,
     results,
+    localizationRois = [],
+    localizationLabel = null,
     onFile,
     onClear,
     backAriaLabel = "Back to live scan",
@@ -52,10 +98,38 @@ export function UploadPanel(props: UploadPanelProps) {
     onOpenSettings,
   } = props;
 
-  const displayUrl = resultImageUrl || previewUrl;
+  const hasLocalization = localizationRois.length > 0;
+  const displayUrl = hasLocalization
+    ? previewUrl
+    : resultImageUrl || previewUrl;
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [natural, setNatural] = useState({ width: 0, height: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  const decodedRois = useMemo(
+    () => localizationRois.filter((roi) => roi.decoded === true),
+    [localizationRois],
+  );
+  const failedRois = useMemo(
+    () => localizationRois.filter((roi) => roi.decoded !== true),
+    [localizationRois],
+  );
+
+  const resultsBadge =
+    results.length + (hasLocalization ? failedRois.length : 0);
 
   const pickFile = useCallback(() => {
     inputRef.current?.click();
@@ -71,7 +145,117 @@ export function UploadPanel(props: UploadPanelProps) {
     [onFile],
   );
 
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setResultsOpen(false);
+  }, [previewUrl]);
+
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (!element) return;
+    const update = () => {
+      setViewportSize({
+        width: element.clientWidth,
+        height: element.clientHeight,
+      });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [previewUrl, open]);
+
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (!element || !previewUrl) return;
+    const onWheelNative = (event: WheelEvent) => {
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      setZoom((current) => {
+        const next = clamp(current + delta, MIN_ZOOM, MAX_ZOOM);
+        if (next <= 1) setPan({ x: 0, y: 0 });
+        return next;
+      });
+    };
+    element.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => element.removeEventListener("wheel", onWheelNative);
+  }, [previewUrl]);
+
+  const setZoomAround = useCallback(
+    (nextZoom: number, clientX?: number, clientY?: number) => {
+      const element = viewportRef.current;
+      const clamped = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
+      if (!element) {
+        setZoom(clamped);
+        if (clamped <= 1) setPan({ x: 0, y: 0 });
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const focusX = clientX == null ? rect.width / 2 : clientX - rect.left;
+      const focusY = clientY == null ? rect.height / 2 : clientY - rect.top;
+      const contentX = (focusX - pan.x) / zoom;
+      const contentY = (focusY - pan.y) / zoom;
+      setZoom(clamped);
+      if (clamped <= 1) {
+        setPan({ x: 0, y: 0 });
+      } else {
+        setPan({
+          x: focusX - contentX * clamped,
+          y: focusY - contentY * clamped,
+        });
+      }
+    },
+    [pan.x, pan.y, zoom],
+  );
+
+  const onPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (zoom <= 1) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: pan.x,
+        originY: pan.y,
+      };
+    },
+    [pan.x, pan.y, zoom],
+  );
+
+  const onPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      setPan({
+        x: drag.originX + (event.clientX - drag.startX),
+        y: drag.originY + (event.clientY - drag.startY),
+      });
+    },
+    [],
+  );
+
+  const endDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+    }
+  }, []);
+
   if (!open) return null;
+
+  const sourceWidth = natural.width;
+  const sourceHeight = natural.height;
+  const fitted = containRect(
+    viewportSize.width,
+    viewportSize.height,
+    sourceWidth || 1,
+    sourceHeight || 1,
+  );
+  const strokeWidth =
+    sourceWidth > 0
+      ? Math.max(2, Math.min(sourceWidth, sourceHeight) / 180)
+      : 2;
 
   return (
     <div className="pg-upload-panel" role="dialog" aria-modal="true">
@@ -91,6 +275,22 @@ export function UploadPanel(props: UploadPanelProps) {
           </p>
         </div>
         <div className="pg-upload-panel__header-actions">
+          {previewUrl ? (
+            <button
+              type="button"
+              className="pg-upload-panel__icon-btn pg-upload-panel__results-btn"
+              aria-label="Open scan results"
+              aria-expanded={resultsOpen}
+              onClick={() => setResultsOpen(true)}
+            >
+              <ResultsIcon />
+              {resultsBadge > 0 ? (
+                <span className="pg-upload-panel__badge">
+                  {resultsBadge > 99 ? "99+" : resultsBadge}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
           {onOpenSettings ? (
             <button
               type="button"
@@ -113,7 +313,9 @@ export function UploadPanel(props: UploadPanelProps) {
         </div>
       </header>
 
-      <div className="pg-upload-panel__body">
+      <div
+        className={`pg-upload-panel__body${previewUrl ? " pg-upload-panel__body--viewer" : ""}`}
+      >
         <input
           ref={inputRef}
           className="pg-upload-panel__file"
@@ -159,93 +361,343 @@ export function UploadPanel(props: UploadPanelProps) {
             </button>
           </div>
         ) : (
-          <div className="pg-upload-result">
-            <div className="pg-upload-result__frame">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={displayUrl!}
-                alt={
-                  resultImageUrl
-                    ? "Scan result with detected barcodes marked"
-                    : "Uploaded barcode image"
-                }
-                className="pg-upload-result__img"
-              />
+          <div className="pg-upload-viewer">
+            <div
+              ref={viewportRef}
+              className="pg-upload-viewer__viewport"
+              data-zoomed={zoom > 1 ? "true" : "false"}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+            >
+              <div
+                className="pg-upload-viewer__stage"
+                style={{
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  transformOrigin: "0 0",
+                }}
+              >
+                {fitted.width > 0 && sourceWidth > 0 ? (
+                  <div
+                    className="pg-upload-viewer__media"
+                    style={{
+                      left: fitted.left,
+                      top: fitted.top,
+                      width: fitted.width,
+                      height: fitted.height,
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={displayUrl!}
+                      alt={
+                        hasLocalization
+                          ? "Uploaded image with localization boxes"
+                          : "Uploaded barcode image"
+                      }
+                      draggable={false}
+                      className="pg-upload-viewer__img"
+                      onLoad={(event) => {
+                        setNatural({
+                          width: event.currentTarget.naturalWidth,
+                          height: event.currentTarget.naturalHeight,
+                        });
+                      }}
+                    />
+                    {!busy && hasLocalization ? (
+                      <svg
+                        className="pg-upload-viewer__overlay"
+                        viewBox={`0 0 ${sourceWidth} ${sourceHeight}`}
+                        preserveAspectRatio="none"
+                      >
+                        {localizationRois.map((roi, index) => {
+                          const ok =
+                            roi.decoded === true &&
+                            (roi.texts?.length ?? 0) > 0;
+                          const markSize = Math.max(18, strokeWidth * 10);
+                          const markPad = Math.max(2, strokeWidth);
+                          const markCx =
+                            roi.x + roi.width - markSize / 2 - markPad;
+                          const markCy = roi.y + markSize / 2 + markPad;
+                          return (
+                            <g key={`loc-${index}-${roi.x}-${roi.y}`}>
+                              <rect
+                                x={roi.x}
+                                y={roi.y}
+                                width={Math.max(1, roi.width)}
+                                height={Math.max(1, roi.height)}
+                                className={
+                                  ok
+                                    ? "pg-upload-result__box pg-upload-result__box--ok"
+                                    : "pg-upload-result__box pg-upload-result__box--fail"
+                                }
+                                strokeWidth={strokeWidth}
+                              />
+                              <circle
+                                cx={markCx}
+                                cy={markCy}
+                                r={markSize / 2}
+                                className={
+                                  ok
+                                    ? "pg-upload-result__mark-bg pg-upload-result__mark-bg--ok"
+                                    : "pg-upload-result__mark-bg pg-upload-result__mark-bg--fail"
+                                }
+                              />
+                              {ok ? (
+                                <path
+                                  className="pg-upload-result__mark"
+                                  d={`M ${markCx - markSize * 0.22} ${markCy}
+                                    L ${markCx - markSize * 0.05} ${markCy + markSize * 0.2}
+                                    L ${markCx + markSize * 0.25} ${markCy - markSize * 0.2}`}
+                                  strokeWidth={strokeWidth * 0.9}
+                                  fill="none"
+                                />
+                              ) : (
+                                <path
+                                  className="pg-upload-result__mark"
+                                  d={`M ${markCx - markSize * 0.18} ${markCy - markSize * 0.18}
+                                    L ${markCx + markSize * 0.18} ${markCy + markSize * 0.18}
+                                    M ${markCx + markSize * 0.18} ${markCy - markSize * 0.18}
+                                    L ${markCx - markSize * 0.18} ${markCy + markSize * 0.18}`}
+                                  strokeWidth={strokeWidth * 0.9}
+                                  fill="none"
+                                />
+                              )}
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    ) : null}
+                  </div>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={displayUrl!}
+                    alt="Uploaded barcode image"
+                    draggable={false}
+                    className="pg-upload-viewer__fallback"
+                    onLoad={(event) => {
+                      setNatural({
+                        width: event.currentTarget.naturalWidth,
+                        height: event.currentTarget.naturalHeight,
+                      });
+                    }}
+                  />
+                )}
+              </div>
+
               {busy ? (
-                <div className="pg-upload-result__busy">Scanning…</div>
+                <div className="pg-upload-result__busy">
+                  <strong>Localizing + decoding…</strong>
+                </div>
+              ) : null}
+
+              {!busy && localizationLabel ? (
+                <div className="pg-upload-result__chip" role="status">
+                  {localizationLabel}
+                </div>
               ) : null}
             </div>
 
-            <div className="pg-upload-result__meta">
-              {!busy && results.length > 0 ? (
-                <>
-                  <p className="pg-upload-result__count">
-                    {results.length} barcode{results.length === 1 ? "" : "s"}{" "}
-                    found
-                  </p>
-                  <ul className="pg-upload-result__list">
-                    {results.map((item, index) => (
-                      <li
-                        key={`${item.id}-${item.timestamp}-${index}`}
-                        className="pg-upload-result__item"
-                      >
-                        <div className="pg-upload-result__thumb" aria-hidden>
-                          {item.cropDataUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={item.cropDataUrl} alt="" />
-                          ) : (
-                            <span className="pg-upload-result__thumb-fallback">
-                              {index + 1}
-                            </span>
-                          )}
-                        </div>
-                        <div className="pg-upload-result__body">
-                          <span className="pg-upload-result__format">
-                            {FORMAT_LABELS[item.format] ?? item.format}
-                            <span className="pg-upload-result__index">
-                              #{index + 1}
-                            </span>
-                          </span>
-                          <span className="pg-upload-result__text">
-                            {item.text}
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : !busy ? (
-                <p className="pg-muted">
-                  No barcodes detected for the selected formats. Open Settings
-                  to enable 1D / 2D types, then try again.
-                </p>
-              ) : null}
+            <div
+              className="pg-upload-viewer__zoom"
+              role="group"
+              aria-label="Image zoom"
+            >
+              <button
+                type="button"
+                className="pg-upload-viewer__zoom-btn"
+                aria-label="Zoom out"
+                disabled={zoom <= MIN_ZOOM}
+                onClick={() => setZoomAround(zoom - ZOOM_STEP)}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="pg-upload-viewer__zoom-btn pg-upload-viewer__zoom-btn--label"
+                aria-label="Reset zoom"
+                disabled={zoom === 1 && pan.x === 0 && pan.y === 0}
+                onClick={() => {
+                  setZoom(1);
+                  setPan({ x: 0, y: 0 });
+                }}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                className="pg-upload-viewer__zoom-btn"
+                aria-label="Zoom in"
+                disabled={zoom >= MAX_ZOOM}
+                onClick={() => setZoomAround(zoom + ZOOM_STEP)}
+              >
+                +
+              </button>
+            </div>
 
-              <div className="pg-btn-row" style={{ marginTop: 16 }}>
-                <button
-                  type="button"
-                  className="pg-btn pg-btn--primary"
-                  onClick={pickFile}
-                >
-                  Choose another
-                </button>
-                <button
-                  type="button"
-                  className="pg-btn pg-btn--secondary"
-                  onClick={onClose}
-                >
-                  {backButtonLabel}
-                </button>
-              </div>
+            <div className="pg-upload-viewer__footer">
+              <button
+                type="button"
+                className="pg-btn pg-btn--primary"
+                onClick={pickFile}
+              >
+                Choose another
+              </button>
+              <button
+                type="button"
+                className="pg-btn pg-btn--secondary"
+                onClick={onClose}
+              >
+                {backButtonLabel}
+              </button>
             </div>
           </div>
         )}
 
         {error ? (
-          <p className="pg-status pg-status--error" style={{ marginTop: 16 }}>
+          <p className="pg-status pg-status--error pg-upload-panel__error">
             {error}
           </p>
         ) : null}
+      </div>
+
+      {resultsOpen ? (
+        <UploadResultsDrawer
+          results={results}
+          failedRois={failedRois}
+          decodedCount={
+            hasLocalization ? decodedRois.length : results.length
+          }
+          onClose={() => setResultsOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type UploadResultsDrawerProps = {
+  results: BarcodeResult[];
+  failedRois: LocalizationRoi[];
+  decodedCount: number;
+  onClose: () => void;
+};
+
+function UploadResultsDrawer({
+  results,
+  failedRois,
+  decodedCount,
+  onClose,
+}: UploadResultsDrawerProps) {
+  return (
+    <div className="pg-upload-results-drawer" role="dialog" aria-modal="true">
+      <button
+        type="button"
+        className="pg-upload-results-drawer__backdrop"
+        aria-label="Close results"
+        onClick={onClose}
+      />
+      <div className="pg-upload-results-drawer__panel">
+        <header className="pg-upload-results-drawer__header">
+          <button
+            type="button"
+            className="pg-upload-results-drawer__back"
+            aria-label="Close results"
+            onClick={onClose}
+          >
+            <ChevronLeftIcon />
+          </button>
+          <h2 className="pg-upload-results-drawer__title">Results</h2>
+          <span className="pg-upload-results-drawer__summary">
+            {decodedCount} ok · {failedRois.length} missed
+          </span>
+        </header>
+
+        <div className="pg-upload-results-drawer__body">
+          <section className="pg-upload-results-section">
+            <h3 className="pg-upload-results-section__title pg-upload-results-section__title--ok">
+              Decoded ({results.length})
+            </h3>
+            {results.length === 0 ? (
+              <p className="pg-upload-results-section__empty">
+                No barcodes decoded yet.
+              </p>
+            ) : (
+              <ul className="pg-upload-result__list">
+                {results.map((item, index) => (
+                  <li
+                    key={`${item.id}-${item.timestamp}-${index}`}
+                    className="pg-upload-result__item"
+                  >
+                    <div className="pg-upload-result__thumb" aria-hidden>
+                      {item.cropDataUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={item.cropDataUrl} alt="" />
+                      ) : (
+                        <span className="pg-upload-result__thumb-fallback">
+                          {index + 1}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pg-upload-result__body">
+                      <span className="pg-upload-result__format">
+                        {FORMAT_LABELS[item.format] ?? item.format}
+                        <span className="pg-upload-result__index">
+                          #{index + 1}
+                        </span>
+                      </span>
+                      <span className="pg-upload-result__text">
+                        {item.text}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="pg-upload-results-section">
+            <h3 className="pg-upload-results-section__title pg-upload-results-section__title--fail">
+              Not decoded ({failedRois.length})
+            </h3>
+            {failedRois.length === 0 ? (
+              <p className="pg-upload-results-section__empty">
+                Every localized box was read successfully.
+              </p>
+            ) : (
+              <ul className="pg-upload-result__list">
+                {failedRois.map((roi, index) => (
+                  <li
+                    key={`fail-${index}-${roi.x}-${roi.y}`}
+                    className="pg-upload-result__item pg-upload-result__item--fail"
+                  >
+                    <div
+                      className="pg-upload-result__thumb pg-upload-result__thumb--fail"
+                      aria-hidden
+                    >
+                      <FailMarkIcon />
+                    </div>
+                    <div className="pg-upload-result__body">
+                      <span className="pg-upload-result__format pg-upload-result__format--fail">
+                        Localized box
+                        <span className="pg-upload-result__index">
+                          #{index + 1}
+                        </span>
+                      </span>
+                      <span className="pg-upload-result__text">
+                        Detected but not decoded
+                        {typeof roi.score === "number"
+                          ? ` · score ${(roi.score * 100).toFixed(0)}%`
+                          : ""}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );
@@ -296,6 +748,39 @@ function SettingsIcon() {
         d="M4 8h11M15 8a2 2 0 1 0 4 0 2 2 0 0 0-4 0ZM4 16h7M11 16a2 2 0 1 0 4 0 2 2 0 0 0-4 0Z"
         stroke="currentColor"
         strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ResultsIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M8 6h13M8 12h13M8 18h13"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+      <path
+        d="M3.5 6.5h.01M3.5 12.5h.01M3.5 18.5h.01"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function FailMarkIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="9" fill="#d30005" />
+      <path
+        d="M8.5 8.5 15.5 15.5M15.5 8.5 8.5 15.5"
+        stroke="#fff"
+        strokeWidth="2"
         strokeLinecap="round"
       />
     </svg>

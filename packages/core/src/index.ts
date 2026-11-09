@@ -80,4 +80,23 @@ export type {
   BarcodeScannerOptions,
   CameraDevice,
   MultiDetectionOptions,
+  LocalizationOptions,
+  LocalizationRoi,
+  ImageLocalization,
+  OnnxBarcodeLocalizer,
+  OnnxLocalizerInitOptions,
 } from "./types/index.js";
+export {
+  createOnnxLocalizer,
+  hybridImageScan,
+  decodeYoloOutput,
+  nms,
+  letterboxImageData,
+  mapBoxToSource,
+  withRoiDecodeStatus,
+  dedupeLocalizationRois,
+  DEFAULT_INPUT_SIZE,
+  DEFAULT_SCORE_THRESHOLD,
+  DEFAULT_IOU_THRESHOLD,
+  DEFAULT_ROI_PADDING,
+} from "./localization/index.js";

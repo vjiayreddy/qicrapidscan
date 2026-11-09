@@ -9,6 +9,11 @@ export type {
   UseBarcodeScannerOptions,
   UseBarcodeScannerResult,
 } from "./hooks/useBarcodeScanner.js";
+export type {
+  ImageLocalization,
+  LocalizationRoi,
+  LocalizationOptions,
+} from "@qicrapidscan/core";
 export { useCamera } from "./hooks/useCamera.js";
 export type { UseCameraResult } from "./hooks/useCamera.js";
 export { useElementSize } from "./hooks/useElementSize.js";

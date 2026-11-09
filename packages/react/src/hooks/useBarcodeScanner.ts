@@ -5,6 +5,7 @@ import {
   type BarcodeResult,
   type BarcodeScannerOptions,
   type CameraDevice,
+  type ImageLocalization,
 } from "@qicrapidscan/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -31,11 +32,15 @@ export interface UseBarcodeScannerResult {
   scanImage: (
     source: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | Blob,
   ) => Promise<BarcodeResult[]>;
+  /** Synchronous read of the latest hybrid localization (after `scanImage`). */
+  getLastLocalization: () => ImageLocalization | null;
   getCameras: () => Promise<CameraDevice[]>;
   switchCamera: (deviceId: string) => Promise<void>;
   results: BarcodeResult[];
   /** Latest AR overlay polygons for the live preview. */
   overlayResults: BarcodeResult[];
+  /** Localization from the most recent hybrid `scanImage` (null if none). */
+  lastLocalization: ImageLocalization | null;
   isScanning: boolean;
   error: Error | null;
   clearError: () => void;
@@ -68,6 +73,8 @@ export function useBarcodeScanner(
 
   const [results, setResults] = useState<BarcodeResult[]>([]);
   const [overlayResults, setOverlayResults] = useState<BarcodeResult[]>([]);
+  const [lastLocalization, setLastLocalization] =
+    useState<ImageLocalization | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -183,8 +190,15 @@ export function useBarcodeScanner(
       const scanner = scannerRef.current;
       if (!scanner) throw new Error("Scanner is not ready.");
       setError(null);
-      return scanner.scanImage(source);
+      const next = await scanner.scanImage(source);
+      setLastLocalization(scanner.getLastImageLocalization());
+      return next;
     },
+    [],
+  );
+
+  const getLastLocalization = useCallback(
+    () => scannerRef.current?.getLastImageLocalization() ?? null,
     [],
   );
 
@@ -201,7 +215,10 @@ export function useBarcodeScanner(
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
-  const clearResults = useCallback(() => setResults([]), []);
+  const clearResults = useCallback(() => {
+    setResults([]);
+    setLastLocalization(null);
+  }, []);
 
   return {
     videoRef,
@@ -210,10 +227,12 @@ export function useBarcodeScanner(
     pause,
     resume,
     scanImage,
+    getLastLocalization,
     getCameras,
     switchCamera,
     results,
     overlayResults,
+    lastLocalization,
     isScanning,
     error,
     clearError,

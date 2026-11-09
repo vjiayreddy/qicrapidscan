@@ -19,6 +19,11 @@ import { decodeWithFallbacks } from "../processing/decodePipeline.js";
 import { FrameProcessor } from "../processing/FrameProcessor.js";
 import { ImageScanner, type ImageSource } from "../processing/ImageScanner.js";
 import { drawVideoFrame } from "../processing/canvas.js";
+import { createOnnxLocalizer } from "../localization/localizer.js";
+import type {
+  ImageLocalization,
+  OnnxBarcodeLocalizer,
+} from "../localization/types.js";
 import type { BarcodeResult } from "../types/barcode.types.js";
 import type { CameraDevice } from "../types/camera.types.js";
 import type { BarcodeScannerOptions } from "../types/scanner.types.js";
@@ -54,6 +59,10 @@ export class BarcodeScanner {
   private camera: CameraManager | null = null;
   private imageScanner: ImageScanner | null = null;
   private multiDetector: MultiBarcodeDetector | null = null;
+  private localizer: OnnxBarcodeLocalizer | null = null;
+  private localizerInit: Promise<boolean> | null = null;
+  private localizerInitError: string | null = null;
+  private lastImageLocalization: ImageLocalization | null = null;
   private video: HTMLVideoElement | null = null;
   private runtimeReady: Promise<void> | null = null;
   private destroyed = false;
@@ -150,7 +159,34 @@ export class BarcodeScanner {
     try {
       // Image scans always use the full configured format list (not live bands).
       this.decoder!.setFormats(this.resolved.formats);
-      let results = await this.imageScanner!.scan(source);
+
+      let results: BarcodeResult[];
+      if (this.resolved.localization.enabled) {
+        const ready = await this.ensureLocalizer();
+        if (ready && this.localizer?.ready) {
+          const outcome = await this.imageScanner!.scanHybrid(source, {
+            localizer: this.localizer,
+            roiPadding: this.resolved.localization.roiPadding,
+            maxRois: this.resolved.localization.maxRois,
+          });
+          this.lastImageLocalization = outcome.localization ?? null;
+          results = outcome.results;
+        } else {
+          this.lastImageLocalization = {
+            rois: [],
+            backend: "none",
+            elapsedMs: 0,
+            usedFallback: true,
+            fallbackReason:
+              this.localizerInitError ?? "localizer_unavailable",
+          };
+          results = await this.imageScanner!.scan(source);
+        }
+      } else {
+        this.lastImageLocalization = null;
+        results = await this.imageScanner!.scan(source);
+      }
+
       if (results.length > 0 && this.resolved.captureCrop) {
         results = await this.attachImageCrops(source, results);
       }
@@ -170,6 +206,11 @@ export class BarcodeScanner {
       this.events.emit("error", mapped);
       throw mapped;
     }
+  }
+
+  /** Localization ROIs from the most recent hybrid `scanImage` (null if none). */
+  getLastImageLocalization(): ImageLocalization | null {
+    return this.lastImageLocalization;
   }
 
   /** Attach JPEG `cropDataUrl` thumbs from still-image geometry. */
@@ -251,8 +292,52 @@ export class BarcodeScanner {
     this.camera = null;
     this.imageScanner = null;
     this.multiDetector = null;
+    if (this.localizer) {
+      await this.localizer.destroy().catch(() => undefined);
+      this.localizer = null;
+    }
+    this.localizerInit = null;
+    this.localizerInitError = null;
+    this.lastImageLocalization = null;
     this.runtimeReady = null;
     this.destroyed = true;
+  }
+
+  private ensureLocalizer(): Promise<boolean> {
+    if (!this.resolved.localization.enabled) {
+      return Promise.resolve(false);
+    }
+    if (this.localizer?.ready) {
+      return Promise.resolve(true);
+    }
+    if (!this.localizerInit) {
+      this.localizerInit = (async () => {
+        try {
+          const localizer = createOnnxLocalizer();
+          await localizer.initialize({
+            modelUrl: this.resolved.localization.modelUrl,
+            ortWasmBaseUrl: this.resolved.localization.ortWasmBaseUrl,
+            scoreThreshold: this.resolved.localization.scoreThreshold,
+            iouThreshold: this.resolved.localization.iouThreshold,
+            inputSize: this.resolved.localization.inputSize,
+            className: this.resolved.localization.className,
+          });
+          this.localizer = localizer;
+          this.localizerInitError = null;
+          return true;
+        } catch (error) {
+          this.localizerInitError =
+            error instanceof Error ? error.message : String(error);
+          console.warn(
+            "[qicrapidscan] ONNX localizer init failed; using decode-only.",
+            error,
+          );
+          this.localizer = null;
+          return false;
+        }
+      })();
+    }
+    return this.localizerInit;
   }
 
   private ensureRuntime(): Promise<void> {
