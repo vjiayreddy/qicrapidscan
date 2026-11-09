@@ -168,6 +168,8 @@ export class BarcodeScanner {
             localizer: this.localizer,
             roiPadding: this.resolved.localization.roiPadding,
             maxRois: this.resolved.localization.maxRois,
+            openCvScriptUrl:
+              this.resolved.localization.openCvScriptUrl || undefined,
           });
           this.lastImageLocalization = outcome.localization ?? null;
           results = outcome.results;
@@ -221,7 +223,14 @@ export class BarcodeScanner {
     const cropSource = await resolveCropSource(source);
     if (!cropSource) return results;
     return results.map((item) => {
-      const cropDataUrl = cropBarcodeFrame(cropSource, item);
+      // Cascade already attached the enhancement frame ZXing decoded.
+      if (item.cropDataUrl) return item;
+      const cropDataUrl = cropBarcodeFrame(cropSource, item, {
+        // Sharp diagnostic thumb — cascade already handled quiet zone / enhance.
+        maxEdge: 256,
+        soften: false,
+        contrast: 1.15,
+      });
       return cropDataUrl ? { ...item, cropDataUrl } : item;
     });
   }

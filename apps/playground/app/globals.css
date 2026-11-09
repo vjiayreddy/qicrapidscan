@@ -1939,25 +1939,21 @@ body:has(.pg-scan-hud) .pg-nav {
 }
 
 .pg-upload-result__box--ok {
+  fill: rgba(30, 170, 82, 0.32);
   stroke: #1eaa52;
 }
 
 .pg-upload-result__box--fail {
+  fill: rgba(211, 0, 5, 0.28);
   stroke: #d30005;
 }
 
-.pg-upload-result__mark-bg--ok {
-  fill: #1eaa52;
-}
-
-.pg-upload-result__mark-bg--fail {
-  fill: #d30005;
-}
-
 .pg-upload-result__mark {
-  stroke: #fff;
+  stroke: #ffffff;
   stroke-linecap: round;
   stroke-linejoin: round;
+  paint-order: stroke fill;
+  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.55));
 }
 
 .pg-upload-result__busy {
@@ -1992,6 +1988,11 @@ body:has(.pg-scan-hud) .pg-nav {
 
 .pg-upload-result__thumb--fail {
   background: #ffe3e3;
+}
+
+.pg-upload-result__thumb--fail img {
+  object-fit: contain;
+  background: #fff;
 }
 
 .pg-upload-result__format--fail {
@@ -2157,6 +2158,11 @@ body:has(.pg-scan-hud) .pg-nav {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.pg-upload-result__thumb--fail img {
+  object-fit: contain;
+  background: #ffffff;
 }
 
 .pg-upload-result__thumb-fallback {

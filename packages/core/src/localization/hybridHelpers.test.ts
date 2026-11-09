@@ -39,6 +39,21 @@ describe("paddedRoiRect", () => {
     expect(rect.y).toBe(0);
     expect(rect.width).toBeGreaterThanOrEqual(10);
   });
+
+  it("forces a square crop centered on the ROI", () => {
+    const rect = paddedRoiRect(
+      { x: 40, y: 40, width: 20, height: 10 },
+      200,
+      200,
+      0.35,
+      { square: true, minPadPx: 0 },
+    );
+    expect(rect.width).toBe(rect.height);
+    expect(rect.width).toBeGreaterThan(20);
+    // Center stays near the original box center.
+    expect(rect.x + rect.width / 2).toBeCloseTo(50, 0);
+    expect(rect.y + rect.height / 2).toBeCloseTo(45, 0);
+  });
 });
 
 describe("findContainingRoiIndex", () => {

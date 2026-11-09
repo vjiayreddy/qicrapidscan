@@ -40,7 +40,7 @@ describe("resolveOptions", () => {
     });
     expect(resolved.localization.enabled).toBe(true);
     expect(resolved.localization.inputSize).toBe(1280);
-    expect(resolved.localization.roiPadding).toBe(0.18);
+    expect(resolved.localization.roiPadding).toBe(0.1);
   });
 
   it("rejects invalid liveZoomCropRatio", () => {

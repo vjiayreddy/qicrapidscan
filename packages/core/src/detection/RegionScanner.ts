@@ -1,5 +1,5 @@
 import type { DecoderAdapter } from "../decoder/DecoderAdapter.js";
-import type { BarcodeResult } from "../types/barcode.types.js";
+import type { BarcodeFormat, BarcodeResult } from "../types/barcode.types.js";
 import { get2dContext } from "../processing/canvas.js";
 import { decodeWithFallbacks } from "../processing/decodePipeline.js";
 import { remapResultToSource } from "./coordinates.js";
@@ -12,6 +12,21 @@ export interface RegionScanOptions {
   imageEnhancement?: boolean;
   rotationRetry?: boolean;
   tryHarder?: boolean;
+  /**
+   * Run the OpenCV.js + zxing-wasm recovery cascade before legacy fallbacks.
+   * Intended for YOLO/localized ROI crops. Default false.
+   */
+  opencvCascade?: boolean;
+  /** Formats forwarded to the cascade (DataMatrix preferred when enabled). */
+  formats?: readonly BarcodeFormat[];
+  /** Staged opencv.js URL for the cascade loader. */
+  openCvScriptUrl?: string;
+}
+
+export interface RegionScanResult {
+  results: BarcodeResult[];
+  /** OpenCV diagnostic preview (success or miss) for UI thumbs. */
+  cascadePreviewDataUrl?: string;
 }
 
 /**
@@ -23,7 +38,7 @@ export async function scanRegion(
   sourceCanvas: HTMLCanvasElement,
   region: Region,
   options: RegionScanOptions = {},
-): Promise<BarcodeResult[]> {
+): Promise<RegionScanResult> {
   const doc = sourceCanvas.ownerDocument ?? document;
   const tile = doc.createElement("canvas");
   tile.width = Math.max(1, Math.floor(region.width));
@@ -44,6 +59,32 @@ export async function scanRegion(
 
   try {
     let decoded: BarcodeResult[] = [];
+    let cascadePreviewDataUrl: string | undefined;
+
+    if (options.opencvCascade) {
+      // Dynamic import keeps OpenCV out of the default decode graph until a
+      // localized ROI actually requests the cascade.
+      const { decodeBarcodeWithCascade } = await import(
+        "../processing/opencvCascade.js"
+      );
+      const outcome = await decodeBarcodeWithCascade(tile, {
+        formats: options.formats,
+        openCvScriptUrl: options.openCvScriptUrl,
+      });
+      cascadePreviewDataUrl = outcome.previewDataUrl;
+      if (outcome.hit) {
+        const remapped = remapResultToSource(outcome.hit.result, region);
+        // Prefer the OpenCV enhancement frame ZXing decoded over a raw crop.
+        if (outcome.hit.enhancedDataUrl) {
+          remapped.cropDataUrl = outcome.hit.enhancedDataUrl;
+        }
+        return {
+          results: [remapped],
+          cascadePreviewDataUrl:
+            outcome.hit.enhancedDataUrl ?? cascadePreviewDataUrl,
+        };
+      }
+    }
 
     if (decoder.decodeAll && !options.regionFallbacks) {
       decoded = await decoder.decodeAll({
@@ -80,7 +121,10 @@ export async function scanRegion(
       if (single) decoded = [single];
     }
 
-    return decoded.map((item) => remapResultToSource(item, region));
+    return {
+      results: decoded.map((item) => remapResultToSource(item, region)),
+      cascadePreviewDataUrl,
+    };
   } finally {
     tile.width = 0;
     tile.height = 0;

@@ -7,8 +7,13 @@ export const DEFAULT_IOU_THRESHOLD = 0.45;
 
 export const DEFAULT_CLASS_NAME = "item";
 
-/** Quiet-zone padding for DataMatrix crops. */
-export const DEFAULT_ROI_PADDING = 0.18;
+/**
+ * Extra padding around the YOLO box before decode.
+ * 10% keeps a thin quiet-zone margin without pulling in bottle curve / label text.
+ */
+export const DEFAULT_ROI_PADDING = 0.1;
 
-/** Wider pad retry when the first crop decode misses. */
+/**
+ * Legacy wider pad (kept for callers that opt in manually).
+ */
 export const RETRY_ROI_PADDING = 0.28;

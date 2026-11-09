@@ -30,6 +30,10 @@ export interface BarcodeResult {
     y: number;
   }>;
   timestamp: number;
-  /** Optional cropped barcode thumbnail (data URL) when captureCrop is enabled. */
+  /**
+   * Optional barcode thumbnail (data URL) when captureCrop is enabled.
+   * Prefer the OpenCV enhancement frame that ZXing decoded when available;
+   * otherwise a raw geometry crop from the source image.
+   */
   cropDataUrl?: string;
 }

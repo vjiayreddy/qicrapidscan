@@ -13,7 +13,8 @@ coverage
 tmp
 *.tgz
 DESIGN.md
-# Local YOLO localizer weights + ORT WASM staged for playground (AGPL / large).
+# Local YOLO localizer weights + ORT WASM + OpenCV staged for playground (large).
 *.onnx
 apps/playground/public/models/
 apps/playground/public/assets/ort/
+apps/playground/public/assets/opencv/

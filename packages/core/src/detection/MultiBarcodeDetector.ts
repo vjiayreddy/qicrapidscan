@@ -114,7 +114,7 @@ export class MultiBarcodeDetector {
       }
 
       regionsScanned += 1;
-      const decoded = await scanRegion(
+      const { results: decoded } = await scanRegion(
         this.decoder,
         sourceCanvas,
         region,

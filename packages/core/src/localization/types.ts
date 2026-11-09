@@ -6,6 +6,17 @@ export interface LocalizationRoi {
   height: number;
   score?: number;
   label?: string;
+  /**
+   * Actual padded square crop used for decode (source pixels).
+   * Prefer this over raw x/y/width/height when rendering failed thumbs.
+   */
+  crop?: { x: number; y: number; width: number; height: number };
+  /**
+   * OpenCV cascade diagnostic preview (CLAHE/sharpen/adaptive, after
+   * straighten/dewarp when available). Prefer for failed ROI thumbs —
+   * raw crops still look curved even when warps were attempted.
+   */
+  previewDataUrl?: string;
   /** True when ZXing decoded at least one code inside this ROI crop. */
   decoded?: boolean;
   /** Decoded payload(s) for this ROI (empty when not decoded). */
@@ -67,9 +78,15 @@ export interface LocalizationOptions {
   scoreThreshold?: number;
   iouThreshold?: number;
   inputSize?: number;
-  /** Extra padding around each ROI as a fraction of box size. Default 0.18. */
+  /** Extra padding around each ROI as a fraction of box size. Default 0.1. */
   roiPadding?: number;
   maxRois?: number;
   /** Detection class label (default "item"). */
   className?: string;
+  /**
+   * URL to a staged `opencv.js` for the ROI recovery cascade.
+   * Preferred in Next.js apps so Webpack never bundles `@techstark/opencv-js`
+   * (which requires Node `fs`). Example: `/assets/opencv/opencv.js`.
+   */
+  openCvScriptUrl?: string;
 }

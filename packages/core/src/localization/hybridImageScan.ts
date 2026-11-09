@@ -3,7 +3,8 @@ import { dedupeResults } from "../detection/Deduplicator.js";
 import { scanRegion } from "../detection/RegionScanner.js";
 import type { BarcodeResult } from "../types/barcode.types.js";
 import { get2dContext } from "../processing/canvas.js";
-import { DEFAULT_ROI_PADDING, RETRY_ROI_PADDING } from "./constants.js";
+import type { BarcodeFormat } from "../types/barcode.types.js";
+import { DEFAULT_ROI_PADDING } from "./constants.js";
 import {
   dedupeLocalizationRois,
   findContainingRoiIndex,
@@ -26,6 +27,15 @@ export interface HybridImageScanOptions {
   imageEnhancement?: boolean;
   rotationRetry?: boolean;
   tryHarder?: boolean;
+  /**
+   * OpenCV.js + zxing-wasm recovery cascade on each YOLO crop.
+   * Default true — soft-skips when OpenCV cannot load.
+   */
+  opencvCascade?: boolean;
+  /** Formats forwarded to the cascade / region decoder. */
+  formats?: readonly BarcodeFormat[];
+  /** Staged opencv.js URL for the ROI cascade (playground / Next). */
+  openCvScriptUrl?: string;
   /** Full-frame / tiling fallback when ROI crops miss. */
   fullFrameDecode: () => Promise<BarcodeResult[]>;
 }
@@ -106,29 +116,40 @@ export async function hybridImageScan(
   const batches: BarcodeResult[][] = [];
   const rois: LocalizationRoi[] = [];
 
-  async function decodeRoi(
-    roi: LocalizationRoi,
-    pad: number,
-  ): Promise<BarcodeResult[]> {
-    const region = {
-      ...paddedRoiRect(roi, canvas.width, canvas.height, pad),
-      depth: 0,
-    };
-    return scanRegion(decoder, canvas, region, {
-      regionFallbacks: options.regionFallbacks ?? true,
-      multiScale: options.multiScale ?? true,
-      imageEnhancement: options.imageEnhancement ?? true,
-      rotationRetry: options.rotationRetry ?? true,
-      tryHarder: options.tryHarder ?? true,
+  async function decodeRoi(roi: LocalizationRoi): Promise<{
+    results: BarcodeResult[];
+    crop: LocalizationRoi["crop"];
+    previewDataUrl?: string;
+  }> {
+    const crop = paddedRoiRect(roi, canvas.width, canvas.height, padRatio, {
+      square: true,
+      minPadPx: 4,
     });
+    const { results, cascadePreviewDataUrl } = await scanRegion(
+      decoder,
+      canvas,
+      { ...crop, depth: 0 },
+      {
+        regionFallbacks: options.regionFallbacks ?? true,
+        multiScale: options.multiScale ?? true,
+        imageEnhancement: options.imageEnhancement ?? true,
+        rotationRetry: options.rotationRetry ?? true,
+        tryHarder: options.tryHarder ?? true,
+        opencvCascade: options.opencvCascade ?? true,
+        formats: options.formats,
+        openCvScriptUrl: options.openCvScriptUrl,
+      },
+    );
+    return { results, crop, previewDataUrl: cascadePreviewDataUrl };
   }
 
   for (const roi of locate.rois) {
-    let mapped = await decodeRoi(roi, padRatio);
-    if (mapped.length === 0) {
-      mapped = await decodeRoi(roi, Math.max(padRatio, RETRY_ROI_PADDING));
-    }
-    rois.push(withRoiDecodeStatus(roi, mapped));
+    const { results: mapped, crop, previewDataUrl } = await decodeRoi(roi);
+    rois.push({
+      ...withRoiDecodeStatus(roi, mapped),
+      crop,
+      previewDataUrl,
+    });
     if (mapped.length > 0) {
       batches.push(mapped);
     }
