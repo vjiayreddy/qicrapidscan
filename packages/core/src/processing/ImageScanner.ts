@@ -5,6 +5,12 @@ import { dedupeResults } from "../detection/Deduplicator.js";
 import type { MultiDetectLimits, MultiDetectStats } from "../detection/types.js";
 import type { BarcodeFormat, BarcodeResult } from "../types/barcode.types.js";
 import { BarcodeError } from "../errors/BarcodeError.js";
+import { hybridImageScan } from "../localization/hybridImageScan.js";
+import type {
+  ImageLocalization,
+  LocalizationRoi,
+  OnnxBarcodeLocalizer,
+} from "../localization/types.js";
 import {
   drawBlob,
   drawCanvasElement,
@@ -43,6 +49,32 @@ export interface ImageScannerOptions {
 export interface ImageScanOutcome {
   results: BarcodeResult[];
   stats?: MultiDetectStats;
+  localization?: ImageLocalization;
+}
+
+export interface HybridScanOptions {
+  localizer: OnnxBarcodeLocalizer;
+  roiPadding?: number;
+  maxRois?: number;
+}
+
+function scaleRoisToSource(
+  rois: LocalizationRoi[],
+  fromWidth: number,
+  fromHeight: number,
+  toWidth: number,
+  toHeight: number,
+): LocalizationRoi[] {
+  if (fromWidth === toWidth && fromHeight === toHeight) return rois;
+  const sx = toWidth / fromWidth;
+  const sy = toHeight / fromHeight;
+  return rois.map((roi) => ({
+    ...roi,
+    x: roi.x * sx,
+    y: roi.y * sy,
+    width: roi.width * sx,
+    height: roi.height * sy,
+  }));
 }
 
 export class ImageScanner {
@@ -63,99 +95,140 @@ export class ImageScanner {
   async scanWithStats(source: ImageSource): Promise<ImageScanOutcome> {
     const sized = await this.toCanvas(source);
     try {
-      if (this.options.multiple && this.options.multiLimits) {
-        const primary = await this.runMultiDetect(sized.canvas);
-        let results = primary.results;
-        let stats = primary.stats;
-
-        // Dense 2D packs fill maxResults before edge 1D codes are tried.
-        const oneD = this.enabledOneD();
-        const twoD = this.enabledTwoD();
-        if (oneD.length > 0 && twoD.length > 0) {
-          const previousFormats = this.options.formats?.length
-            ? [...this.options.formats]
-            : [...oneD, ...twoD];
-          this.decoder.setFormats(oneD);
-          try {
-            const oneDLimits: MultiDetectLimits = {
-              ...this.options.multiLimits,
-              maxResults: Math.max(this.options.multiLimits.maxResults, 16),
-              maxRegions: Math.max(this.options.multiLimits.maxRegions, 20),
-              maxTimeMs: Math.max(this.options.multiLimits.maxTimeMs, 800),
-            };
-            const secondary = await new MultiBarcodeDetector(
-              this.decoder,
-              oneDLimits,
-              {
-                // Enable fallbacks so vertical side 1D codes can rotate.
-                regionFallbacks: true,
-                multiScale: false,
-                imageEnhancement: false,
-                rotationRetry: this.options.rotationRetry ?? true,
-                tryHarder: this.options.tryHarder ?? true,
-              },
-            ).detect(sized.canvas);
-
-            results = dedupeResults([...results, ...secondary.results]).slice(
-              0,
-              Math.max(oneDLimits.maxResults, this.options.multiLimits.maxResults),
-            );
-            stats = {
-              ...stats,
-              regionsScanned: stats.regionsScanned + secondary.stats.regionsScanned,
-              resultsBeforeDedupe:
-                stats.resultsBeforeDedupe + secondary.stats.resultsBeforeDedupe,
-              resultsAfterDedupe: results.length,
-              elapsedMs: stats.elapsedMs + secondary.stats.elapsedMs,
-            };
-          } finally {
-            this.decoder.setFormats(previousFormats);
-          }
-        }
-
-        if (results.length > 0) {
-          return {
-            results: scaleResultsToSource(
-              results,
-              sized.canvas.width,
-              sized.canvas.height,
-              sized.sourceWidth,
-              sized.sourceHeight,
-            ),
-            stats,
-          };
-        }
-
-        const fallback = await this.decodeSingleWithFallbacks(sized.canvas);
-        return {
-          results: fallback
-            ? scaleResultsToSource(
-                [fallback],
-                sized.canvas.width,
-                sized.canvas.height,
-                sized.sourceWidth,
-                sized.sourceHeight,
-              )
-            : [],
-          stats,
-        };
-      }
-
-      const result = await this.decodeSingleWithFallbacks(sized.canvas);
+      const decoded = await this.decodeOnCanvas(sized.canvas);
       return {
-        results: result
-          ? scaleResultsToSource(
-              [result],
-              sized.canvas.width,
-              sized.canvas.height,
-              sized.sourceWidth,
-              sized.sourceHeight,
-            )
-          : [],
+        results: scaleResultsToSource(
+          decoded.results,
+          sized.canvas.width,
+          sized.canvas.height,
+          sized.sourceWidth,
+          sized.sourceHeight,
+        ),
+        stats: decoded.stats,
       };
     } finally {
       sized.cleanup();
     }
+  }
+
+  /**
+   * ONNX localize → padded ROI decode → full-frame fill for misses.
+   * Geometry is scaled back to the original source dimensions.
+   */
+  async scanHybrid(
+    source: ImageSource,
+    hybrid: HybridScanOptions,
+  ): Promise<ImageScanOutcome> {
+    const sized = await this.toCanvas(source);
+    try {
+      const outcome = await hybridImageScan(this.decoder, sized.canvas, {
+        localizer: hybrid.localizer,
+        roiPadding: hybrid.roiPadding,
+        maxRois: hybrid.maxRois,
+        maxResults: this.options.multiLimits?.maxResults ?? 64,
+        regionFallbacks: true,
+        multiScale: this.options.multiScale ?? true,
+        imageEnhancement: this.options.imageEnhancement ?? true,
+        rotationRetry: this.options.rotationRetry ?? true,
+        tryHarder: this.options.tryHarder ?? true,
+        fullFrameDecode: async () => {
+          const decoded = await this.decodeOnCanvas(sized.canvas);
+          return decoded.results;
+        },
+      });
+
+      return {
+        results: scaleResultsToSource(
+          outcome.results,
+          sized.canvas.width,
+          sized.canvas.height,
+          sized.sourceWidth,
+          sized.sourceHeight,
+        ),
+        localization: {
+          ...outcome.localization,
+          rois: scaleRoisToSource(
+            outcome.localization.rois,
+            sized.canvas.width,
+            sized.canvas.height,
+            sized.sourceWidth,
+            sized.sourceHeight,
+          ),
+        },
+      };
+    } finally {
+      sized.cleanup();
+    }
+  }
+
+  /** Decode on an already-sized processing canvas (canvas pixel coords). */
+  private async decodeOnCanvas(canvas: HTMLCanvasElement): Promise<{
+    results: BarcodeResult[];
+    stats?: MultiDetectStats;
+  }> {
+    if (this.options.multiple && this.options.multiLimits) {
+      const primary = await this.runMultiDetect(canvas);
+      let results = primary.results;
+      let stats = primary.stats;
+
+      // Dense 2D packs fill maxResults before edge 1D codes are tried.
+      const oneD = this.enabledOneD();
+      const twoD = this.enabledTwoD();
+      if (oneD.length > 0 && twoD.length > 0) {
+        const previousFormats = this.options.formats?.length
+          ? [...this.options.formats]
+          : [...oneD, ...twoD];
+        this.decoder.setFormats(oneD);
+        try {
+          const oneDLimits: MultiDetectLimits = {
+            ...this.options.multiLimits,
+            maxResults: Math.max(this.options.multiLimits.maxResults, 16),
+            maxRegions: Math.max(this.options.multiLimits.maxRegions, 20),
+            maxTimeMs: Math.max(this.options.multiLimits.maxTimeMs, 800),
+          };
+          const secondary = await new MultiBarcodeDetector(
+            this.decoder,
+            oneDLimits,
+            {
+              // Enable fallbacks so vertical side 1D codes can rotate.
+              regionFallbacks: true,
+              multiScale: false,
+              imageEnhancement: false,
+              rotationRetry: this.options.rotationRetry ?? true,
+              tryHarder: this.options.tryHarder ?? true,
+            },
+          ).detect(canvas);
+
+          results = dedupeResults([...results, ...secondary.results]).slice(
+            0,
+            Math.max(oneDLimits.maxResults, this.options.multiLimits.maxResults),
+          );
+          stats = {
+            ...stats,
+            regionsScanned: stats.regionsScanned + secondary.stats.regionsScanned,
+            resultsBeforeDedupe:
+              stats.resultsBeforeDedupe + secondary.stats.resultsBeforeDedupe,
+            resultsAfterDedupe: results.length,
+            elapsedMs: stats.elapsedMs + secondary.stats.elapsedMs,
+          };
+        } finally {
+          this.decoder.setFormats(previousFormats);
+        }
+      }
+
+      if (results.length > 0) {
+        return { results, stats };
+      }
+
+      const fallback = await this.decodeSingleWithFallbacks(canvas);
+      return {
+        results: fallback ? [fallback] : [],
+        stats,
+      };
+    }
+
+    const result = await this.decodeSingleWithFallbacks(canvas);
+    return { results: result ? [result] : [] };
   }
 
   private async runMultiDetect(canvas: HTMLCanvasElement): Promise<{

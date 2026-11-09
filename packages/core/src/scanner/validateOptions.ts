@@ -1,7 +1,26 @@
 import { BarcodeError } from "../errors/BarcodeError.js";
 import { assertSupportedFormats, DEFAULT_FORMATS } from "../decoder/formats.js";
+import {
+  DEFAULT_CLASS_NAME,
+  DEFAULT_INPUT_SIZE,
+  DEFAULT_IOU_THRESHOLD,
+  DEFAULT_ROI_PADDING,
+  DEFAULT_SCORE_THRESHOLD,
+} from "../localization/constants.js";
 import type { BarcodeScannerOptions } from "../types/scanner.types.js";
 import type { BarcodeFormat } from "../types/barcode.types.js";
+
+export interface ResolvedLocalizationOptions {
+  enabled: boolean;
+  modelUrl: string;
+  ortWasmBaseUrl: string;
+  scoreThreshold: number;
+  iouThreshold: number;
+  inputSize: number;
+  roiPadding: number;
+  maxRois: number;
+  className: string;
+}
 
 export interface ResolvedScannerOptions {
   formats: BarcodeFormat[];
@@ -35,6 +54,7 @@ export interface ResolvedScannerOptions {
     mode: "cooldown" | "once";
   };
   captureCrop: boolean;
+  localization: ResolvedLocalizationOptions;
 }
 
 function assertPositiveNumber(name: string, value: number | undefined): void {
@@ -62,6 +82,11 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
   assertPositiveNumber("performance.liveZoomCropRatio", options.performance?.liveZoomCropRatio);
   assertPositiveNumber("performance.liveZoomScale", options.performance?.liveZoomScale);
   assertPositiveNumber("duplicateFilter.cooldown", options.duplicateFilter?.cooldown);
+  assertPositiveNumber("localization.scoreThreshold", options.localization?.scoreThreshold);
+  assertPositiveNumber("localization.iouThreshold", options.localization?.iouThreshold);
+  assertPositiveNumber("localization.inputSize", options.localization?.inputSize);
+  assertPositiveNumber("localization.roiPadding", options.localization?.roiPadding);
+  assertPositiveNumber("localization.maxRois", options.localization?.maxRois);
 
   if (
     options.detection?.overlap !== undefined &&
@@ -102,6 +127,22 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
     );
   }
 
+  const localizationEnabled = options.localization?.enabled === true;
+  if (localizationEnabled) {
+    if (!options.localization?.modelUrl?.trim()) {
+      throw new BarcodeError(
+        "SCAN_FAILED",
+        'Invalid option "localization.modelUrl": required when localization.enabled is true.',
+      );
+    }
+    if (!options.localization?.ortWasmBaseUrl?.trim()) {
+      throw new BarcodeError(
+        "SCAN_FAILED",
+        'Invalid option "localization.ortWasmBaseUrl": required when localization.enabled is true.',
+      );
+    }
+  }
+
   return {
     formats,
     camera: options.camera,
@@ -137,5 +178,19 @@ export function resolveOptions(options: BarcodeScannerOptions = {}): ResolvedSca
       mode: duplicateMode,
     },
     captureCrop: options.captureCrop ?? false,
+    localization: {
+      enabled: localizationEnabled,
+      modelUrl: options.localization?.modelUrl?.trim() ?? "",
+      ortWasmBaseUrl: options.localization?.ortWasmBaseUrl?.trim() ?? "",
+      scoreThreshold:
+        options.localization?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD,
+      iouThreshold: options.localization?.iouThreshold ?? DEFAULT_IOU_THRESHOLD,
+      inputSize: options.localization?.inputSize ?? DEFAULT_INPUT_SIZE,
+      roiPadding: options.localization?.roiPadding ?? DEFAULT_ROI_PADDING,
+      maxRois:
+        options.localization?.maxRois ??
+        Math.max(32, (options.detection?.maxResults ?? 10) * 4),
+      className: options.localization?.className ?? DEFAULT_CLASS_NAME,
+    },
   };
 }

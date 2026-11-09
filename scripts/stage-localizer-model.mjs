@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+/**
+ * Stage YOLO DataMatrix ONNX + onnxruntime-web WASM into the playground public/
+ * folder for hybrid image-upload localization.
+ *
+ * Usage (repo root):
+ *   node scripts/stage-localizer-model.mjs
+ *   QICRAPIDSCAN_LOCALIZER_MODEL_PATH=/path/to/model.onnx node scripts/stage-localizer-model.mjs
+ *
+ * Legal: Ultralytics YOLO exports are AGPL-3.0 — do not publish these weights
+ * in the npm package without a separate license decision.
+ */
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const MODEL_NAME = "datamatrix-model.onnx";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const publicRoot = join(root, "apps/playground/public");
+const modelDestDir = join(publicRoot, "models");
+const modelDest = join(modelDestDir, MODEL_NAME);
+const ortDestDir = join(publicRoot, "assets/ort");
+
+const modelCandidates = [
+  process.env.QICRAPIDSCAN_LOCALIZER_MODEL_PATH?.trim() || "",
+  join("/Users/vijay/Downloads", MODEL_NAME),
+  join(root, "models", MODEL_NAME),
+  join(modelDestDir, MODEL_NAME),
+].filter(Boolean);
+
+const modelSource = modelCandidates.find((path) => existsSync(path));
+if (!modelSource) {
+  console.error(`✗ Could not find ${MODEL_NAME}. Looked in:`);
+  for (const path of modelCandidates) console.error(`  - ${path}`);
+  console.error(
+    "Set QICRAPIDSCAN_LOCALIZER_MODEL_PATH or place the file under ~/Downloads/.",
+  );
+  process.exit(1);
+}
+
+mkdirSync(modelDestDir, { recursive: true });
+if (modelSource !== modelDest) {
+  cpSync(modelSource, modelDest);
+}
+console.log(
+  `Staged model → ${modelDest} (${statSync(modelDest).size} bytes)`,
+);
+
+const require = createRequire(import.meta.url);
+let ortDist;
+try {
+  const ortEntry = require.resolve("onnxruntime-web");
+  ortDist = dirname(ortEntry);
+} catch {
+  console.error(
+    "✗ onnxruntime-web is not installed. Run: pnpm add -Dw onnxruntime-web",
+  );
+  process.exit(1);
+}
+
+mkdirSync(ortDestDir, { recursive: true });
+let copied = 0;
+for (const file of readdirSync(ortDist)) {
+  const keep =
+    file === "ort.wasm.min.mjs" ||
+    file === "ort.min.mjs" ||
+    file === "ort.wasm.mjs" ||
+    file === "ort.wasm.min.js" ||
+    file === "ort.min.js" ||
+    file.startsWith("ort-wasm") ||
+    file.endsWith(".wasm");
+  if (!keep) continue;
+  cpSync(join(ortDist, file), join(ortDestDir, file));
+  copied += 1;
+}
+console.log(`Copied ${copied} onnxruntime-web assets → ${ortDestDir}`);
+console.log(
+  "Reminder: AGPL Ultralytics weights are for local playground testing only.",
+);

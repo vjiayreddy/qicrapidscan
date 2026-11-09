@@ -24,6 +24,23 @@ describe("resolveOptions", () => {
     expect(resolved.detection.maxTimeMs).toBe(250);
     expect(resolved.duplicateFilter.mode).toBe("cooldown");
     expect(resolved.captureCrop).toBe(false);
+    expect(resolved.localization.enabled).toBe(false);
+  });
+
+  it("requires model URLs when localization is enabled", () => {
+    expect(() => resolveOptions({ localization: { enabled: true } })).toThrow(
+      BarcodeError,
+    );
+    const resolved = resolveOptions({
+      localization: {
+        enabled: true,
+        modelUrl: "/models/datamatrix-model.onnx",
+        ortWasmBaseUrl: "/assets/ort/",
+      },
+    });
+    expect(resolved.localization.enabled).toBe(true);
+    expect(resolved.localization.inputSize).toBe(1280);
+    expect(resolved.localization.roiPadding).toBe(0.18);
   });
 
   it("rejects invalid liveZoomCropRatio", () => {

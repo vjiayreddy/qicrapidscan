@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { BarcodeFormat, BarcodeResult } from "@qicrapidscan/core";
+import type {
+  BarcodeFormat,
+  BarcodeResult,
+  ImageLocalization,
+} from "@qicrapidscan/core";
 import {
   ALL_SUPPORTED_FORMATS,
   annotateBarcodeImage,
@@ -68,6 +72,17 @@ const UPLOAD_PERFORMANCE = {
   imageEnhancement: true,
 } as const;
 
+/** YOLO26 DataMatrix localizer — model staged under public/models/. */
+const UPLOAD_LOCALIZATION = {
+  enabled: true,
+  modelUrl: "/models/datamatrix-model.onnx",
+  ortWasmBaseUrl: "/assets/ort/",
+  inputSize: 1280,
+  scoreThreshold: 0.25,
+  iouThreshold: 0.45,
+  roiPadding: 0.18,
+} as const;
+
 const FINDER_ROI: RoiRect = {
   left: 12,
   top: 22,
@@ -130,6 +145,8 @@ export function ScannerDemo() {
     null,
   );
   const [uploadResults, setUploadResults] = useState<BarcodeResult[]>([]);
+  const [uploadLocalization, setUploadLocalization] =
+    useState<ImageLocalization | null>(null);
 
   const formats = useMemo(() => {
     const selected = ALL_SUPPORTED_FORMATS.filter((f) => enabledFormats.has(f));
@@ -177,18 +194,41 @@ export function ScannerDemo() {
     formats,
     detection: { ...UPLOAD_DETECTION, multiple },
     performance: { ...UPLOAD_PERFORMANCE },
+    localization: { ...UPLOAD_LOCALIZATION },
     captureCrop: true,
     autoStart: false,
     onError: (err) => setUploadError(err.message),
   });
 
+  const localizationRois = uploadLocalization?.rois ?? [];
+  const localizationLabel =
+    uploadLocalization?.backend === "onnx"
+      ? `Boxes ${localizationRois.length} · Decoded ${
+          localizationRois.filter((roi) => roi.decoded).length
+        }`
+      : uploadLocalization?.backend === "none" ||
+          uploadLocalization?.backend === "passthrough"
+        ? uploadLocalization.fallbackReason
+          ? `Decode-only: ${uploadLocalization.fallbackReason}`
+          : "Decode-only (localizer unavailable)"
+        : null;
+
   const uploadPreviewRef = useRef<string | null>(null);
   uploadPreviewRef.current = uploadPreview;
 
   const applyUploadResults = useCallback(
-    (img: HTMLImageElement, results: BarcodeResult[]) => {
+    (
+      img: HTMLImageElement,
+      results: BarcodeResult[],
+      localization: ImageLocalization | null,
+    ) => {
       setUploadResults(results);
-      if (results.length > 0 && showOverlay) {
+      setUploadLocalization(localization);
+      // When YOLO localization is active, UploadPanel draws ✓/✗ SVG overlays.
+      const hasLocalization =
+        (localization?.rois?.length ?? 0) > 0 &&
+        localization?.backend === "onnx";
+      if (results.length > 0 && showOverlay && !hasLocalization) {
         setUploadResultImage(
           annotateBarcodeImage(img, results, {
             maxEdge: 2048,
@@ -206,6 +246,7 @@ export function ScannerDemo() {
   useEffect(() => {
     setUploadResults([]);
     setUploadResultImage(null);
+    setUploadLocalization(null);
   }, [formatsKey]);
 
   // Re-decode the current image when formats / multiple change.
@@ -221,7 +262,7 @@ export function ScannerDemo() {
         if (cancelled) return;
         const results = await upload.scanImage(img);
         if (cancelled) return;
-        applyUploadResults(img, results);
+        applyUploadResults(img, results, upload.getLastLocalization());
       } catch (err) {
         if (!cancelled) {
           setUploadError(err instanceof Error ? err.message : String(err));
@@ -264,6 +305,7 @@ export function ScannerDemo() {
     };
   }, [showOverlay, uploadResults]);
 
+  const clearUploadLocalization = upload.clearResults;
   const clearUpload = useCallback(() => {
     setUploadPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
@@ -271,9 +313,11 @@ export function ScannerDemo() {
     });
     setUploadResults([]);
     setUploadResultImage(null);
+    setUploadLocalization(null);
     setUploadError(null);
     setUploadBusy(false);
-  }, []);
+    clearUploadLocalization();
+  }, [clearUploadLocalization]);
 
   const returnToPicker = useCallback(() => {
     setDemoMode(null);
@@ -311,6 +355,7 @@ export function ScannerDemo() {
       setUploadError(null);
       setUploadResults([]);
       setUploadResultImage(null);
+      setUploadLocalization(null);
       setUploadBusy(true);
 
       const url = URL.createObjectURL(file);
@@ -322,7 +367,7 @@ export function ScannerDemo() {
       try {
         const img = await loadImage(url);
         const results = await upload.scanImage(img);
-        applyUploadResults(img, results);
+        applyUploadResults(img, results, upload.getLastLocalization());
         if (results.length > 0 && beepRef.current) playBeep();
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : String(err));
@@ -548,6 +593,8 @@ export function ScannerDemo() {
         previewUrl={uploadPreview}
         resultImageUrl={uploadResultImage}
         results={uploadResults}
+        localizationRois={localizationRois}
+        localizationLabel={localizationLabel}
         onFile={(file) => void onUploadFile(file)}
         onClear={clearUpload}
         backAriaLabel={
