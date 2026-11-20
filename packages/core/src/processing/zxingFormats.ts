@@ -165,6 +165,14 @@ export function computeCascadeScaleFactor(
   return Math.min(Math.max(1, maxScale), raw);
 }
 
+export interface DecodeCanvasWithZxingOptions {
+  /**
+   * When true, do not downscale large canvases (prepared ROI decode path
+   * already sized the input). Default false.
+   */
+  preserveResolution?: boolean;
+}
+
 /**
  * Direct zxing-wasm decode on a canvas (tryHarder + rotate + invert).
  * Upscales thin ROI crops; downscales huge full-frames for reliability.
@@ -172,6 +180,7 @@ export function computeCascadeScaleFactor(
 export async function decodeCanvasWithZxing(
   canvas: HTMLCanvasElement,
   formats?: readonly BarcodeFormat[],
+  options: DecodeCanvasWithZxingOptions = {},
 ): Promise<BarcodeResult[]> {
   if (typeof document === "undefined") return [];
   if (canvas.width < 2 || canvas.height < 2) return [];
@@ -183,7 +192,7 @@ export async function decodeCanvasWithZxing(
   let scale = 1;
   if (shortEdge > 0 && shortEdge < 128) {
     scale = Math.min(5, 128 / shortEdge);
-  } else if (longEdge > 1600) {
+  } else if (!options.preserveResolution && longEdge > 1600) {
     // Full-frame shipping photos: keep ZXing in a workable budget.
     scale = 1600 / longEdge;
   }

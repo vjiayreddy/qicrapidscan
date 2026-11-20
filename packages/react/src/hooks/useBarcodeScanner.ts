@@ -6,6 +6,7 @@ import {
   type BarcodeScannerOptions,
   type CameraDevice,
   type ImageLocalization,
+  type ScanImageOptions,
 } from "@qicrapidscan/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -31,6 +32,7 @@ export interface UseBarcodeScannerResult {
   resume: () => void;
   scanImage: (
     source: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | Blob,
+    options?: ScanImageOptions,
   ) => Promise<BarcodeResult[]>;
   /** Synchronous read of the latest hybrid localization (after `scanImage`). */
   getLastLocalization: () => ImageLocalization | null;
@@ -186,11 +188,12 @@ export function useBarcodeScanner(
   const scanImage = useCallback(
     async (
       source: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | Blob,
+      options?: ScanImageOptions,
     ) => {
       const scanner = scannerRef.current;
       if (!scanner) throw new Error("Scanner is not ready.");
       setError(null);
-      const next = await scanner.scanImage(source);
+      const next = await scanner.scanImage(source, options);
       setLastLocalization(scanner.getLastImageLocalization());
       return next;
     },

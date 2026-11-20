@@ -34,6 +34,23 @@ export interface ImageLocalization {
   fallbackReason?: string;
 }
 
+/** Staged progress for hybrid still-image localize + decode. */
+export type HybridScanProgressPhase =
+  | "preparing"
+  | "localizing"
+  | "decoding_rois"
+  | "retrying_rois"
+  | "full_frame"
+  | "done";
+
+export interface HybridScanProgress {
+  phase: HybridScanProgressPhase;
+  message: string;
+  roiIndex?: number;
+  roiTotal?: number;
+  decodedCount?: number;
+}
+
 export interface LocateInput {
   imageData: ImageData;
   maxRois?: number;
@@ -88,7 +105,10 @@ export interface LocalizationOptions {
   scoreThreshold?: number;
   iouThreshold?: number;
   inputSize?: number;
-  /** Extra padding around each ROI as a fraction of box size. Default 0.1. */
+  /**
+   * Extra padding around each ROI as a fraction of box size. Default 0.1.
+   * Use `0` for an exact YOLO box crop (no padding / square expand).
+   */
   roiPadding?: number;
   maxRois?: number;
   /**

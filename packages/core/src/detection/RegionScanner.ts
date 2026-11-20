@@ -6,6 +6,7 @@ import {
   enhanceForDecode,
   resizeCanvas,
 } from "../processing/decodePipeline.js";
+import { prepareBarcodeDecodeCanvas } from "../processing/prepareBarcodeDecodeCanvas.js";
 import { decodeCanvasWithZxing } from "../processing/zxingFormats.js";
 import { remapResultToSource } from "./coordinates.js";
 import type { Region } from "./types.js";
@@ -26,6 +27,11 @@ export interface RegionScanOptions {
   formats?: readonly BarcodeFormat[];
   /** Staged opencv.js URL for the cascade loader. */
   openCvScriptUrl?: string;
+  /**
+   * Full decode prep: min-width upscale + white quiet-zone + grayscale /
+   * contrast / 2× / sharpen → zxing-wasm. Default true.
+   */
+  preparedZxingDecode?: boolean;
 }
 
 export interface RegionScanResult {
@@ -83,6 +89,38 @@ function prepareLinearTile(tile: HTMLCanvasElement): {
   return { canvas: resized.canvas, cleanup: resized.cleanup, scale };
 }
 
+function mapPreparedHitsToRegion(
+  hits: BarcodeResult[],
+  region: Region,
+  toTileLocal: (x: number, y: number) => { x: number; y: number },
+): BarcodeResult[] {
+  return hits.map((item) => {
+    const points = item.points?.map((point) => toTileLocal(point.x, point.y));
+    let boundingBox = item.boundingBox;
+    if (boundingBox) {
+      const tl = toTileLocal(boundingBox.x, boundingBox.y);
+      const br = toTileLocal(
+        boundingBox.x + boundingBox.width,
+        boundingBox.y + boundingBox.height,
+      );
+      boundingBox = {
+        x: tl.x,
+        y: tl.y,
+        width: Math.max(1, br.x - tl.x),
+        height: Math.max(1, br.y - tl.y),
+      };
+    }
+    return remapResultToSource(
+      {
+        ...item,
+        points,
+        boundingBox,
+      },
+      region,
+    );
+  });
+}
+
 /**
  * Decode a crop of the source canvas and remap geometry to source coordinates.
  */
@@ -123,18 +161,52 @@ export async function scanRegion(
   }
 
   const linearPrep = prepareLinearTile(tile);
+  let preparedCleanup: (() => void) | undefined;
 
   try {
     let decoded: BarcodeResult[] = [];
     let fromZxingPrep = false;
     let cascadePreviewDataUrl: string | undefined;
 
-    // 1) Raw / enhanced / upscaled decode FIRST.
+    // 0) Preferred path: min-width + white quiet-zone + grayscale/contrast/
+    // 2×/sharpen → zxing-wasm (tryHarder + tryRotate).
+    if (options.preparedZxingDecode !== false) {
+      const prepared = prepareBarcodeDecodeCanvas(tile, {
+        minBarcodeWidth: 500,
+        whiteBorderPx: 30,
+        finalUpscale: 2,
+        contrast: 1.8,
+      });
+      if (prepared) {
+        preparedCleanup = prepared.cleanup;
+        try {
+          const hits = await decodeCanvasWithZxing(
+            prepared.canvas,
+            options.formats,
+            { preserveResolution: true },
+          );
+          if (hits.length > 0) {
+            return {
+              results: mapPreparedHitsToRegion(
+                hits,
+                region,
+                prepared.toTileLocal,
+              ),
+              cascadePreviewDataUrl,
+              rawCropDataUrl,
+            };
+          }
+        } catch {
+          // Fall through to legacy decoder ladder.
+        }
+      }
+    }
+
+    // 1) Raw / enhanced / upscaled decode.
     // OpenCV bottle cascade can destroy flat shipping-label symbologies.
     if (decoder.decodeAll) {
       decoded = await decoder.decodeAll({
         canvas: linearPrep.canvas,
-        // Map detector coords from prep canvas → original region size.
         sourceWidth: region.width,
         sourceHeight: region.height,
       });
@@ -150,7 +222,6 @@ export async function scanRegion(
         scales: [1, 1.5, 2, 2.5, 3],
       });
       if (single) {
-        // decodeWithFallbacks returns prep-canvas coords — scale to tile size.
         const inv = linearPrep.scale > 0 ? 1 / linearPrep.scale : 1;
         decoded = [
           {
@@ -231,7 +302,6 @@ export async function scanRegion(
     }
 
     const remapped = decoded.map((item) => {
-      // ZXing path returns prep-canvas pixels; scale back to tile space first.
       if (fromZxingPrep && linearPrep.scale !== 1) {
         const inv = 1 / linearPrep.scale;
         const scaled: BarcodeResult = {
@@ -248,7 +318,6 @@ export async function scanRegion(
         };
         return remapResultToSource(scaled, region);
       }
-      // decodeAll(sourceWidth/Height) already mapped into region-local space.
       return remapResultToSource(item, region);
     });
 
@@ -258,6 +327,7 @@ export async function scanRegion(
       rawCropDataUrl,
     };
   } finally {
+    preparedCleanup?.();
     linearPrep.cleanup();
     if (restoreFormats && restoreFormats.length > 0) {
       decoder.setFormats(restoreFormats);

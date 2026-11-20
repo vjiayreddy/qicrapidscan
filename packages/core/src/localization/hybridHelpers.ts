@@ -143,6 +143,28 @@ export interface PaddedRoiRectOptions {
   minPadPx?: number;
 }
 
+/**
+ * Exact YOLO box crop — no pad ratio, no square expand, no linear floors.
+ * Only clamped to the source frame. Use when `roiPadding <= 0`.
+ */
+export function exactRoiRect(
+  roi: { x: number; y: number; width: number; height: number },
+  sourceWidth: number,
+  sourceHeight: number,
+): { x: number; y: number; width: number; height: number } {
+  const x = Math.max(0, Math.min(Math.floor(roi.x), Math.max(0, sourceWidth - 1)));
+  const y = Math.max(0, Math.min(Math.floor(roi.y), Math.max(0, sourceHeight - 1)));
+  const width = Math.max(
+    1,
+    Math.min(Math.round(roi.width), sourceWidth - x),
+  );
+  const height = Math.max(
+    1,
+    Math.min(Math.round(roi.height), sourceHeight - y),
+  );
+  return { x, y, width, height };
+}
+
 /** Axis-aligned crop rect with relative padding, clamped to the source. */
 export function paddedRoiRect(
   roi: { x: number; y: number; width: number; height: number },

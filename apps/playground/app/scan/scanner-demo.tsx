@@ -59,14 +59,14 @@ const UPLOAD_DETECTION = {
   maxRegions: 48,
   maxDepth: 3,
   overlap: 0.25,
-  // Dense Data Matrix packs + edge 1D need a longer tile budget.
-  maxTimeMs: 8000,
+  // Hybrid caps full-frame fill further; keep a headroom budget for decode-only.
+  maxTimeMs: 5000,
 } as const;
 
 const UPLOAD_PERFORMANCE = {
-  // Keep more resolution so tiny tray Data Matrices stay readable after downscale.
-  maxWidth: 2560,
-  maxHeight: 2560,
+  // 1920 keeps tiny Data Matrices readable without the 2560 main-thread cost.
+  maxWidth: 1920,
+  maxHeight: 1920,
   tryHarder: true,
   alsoInverted: true,
   multiScale: true,
@@ -84,8 +84,8 @@ const UPLOAD_LOCALIZATION = {
   inputSize: 1280,
   scoreThreshold: 0.25,
   iouThreshold: 0.45,
-  // Extra pad helps Code128 quiet zones and DataMatrix L-finders on labels.
-  roiPadding: 0.28,
+  // +18% pad feeds quiet zones into the white-border zxing-wasm prep path.
+  roiPadding: 0.18,
   classNames: PHARMA_LOCALIZER_CLASS_NAMES,
 } as const;
 
@@ -142,6 +142,9 @@ export function ScannerDemo() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadBusyMessage, setUploadBusyMessage] = useState(
+    "Localizing + decoding…",
+  );
   const [multiple, setMultiple] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
   const [editRoi, setEditRoi] = useState(false);
@@ -234,6 +237,7 @@ export function ScannerDemo() {
 
   const uploadPreviewRef = useRef<string | null>(null);
   uploadPreviewRef.current = uploadPreview;
+  const uploadScanGenRef = useRef(0);
 
   const applyUploadResults = useCallback(
     (
@@ -278,22 +282,32 @@ export function ScannerDemo() {
   useEffect(() => {
     const url = uploadPreviewRef.current;
     if (!url) return;
+    const gen = ++uploadScanGenRef.current;
     let cancelled = false;
     void (async () => {
       setUploadBusy(true);
+      setUploadBusyMessage("Re-scanning with new settings…");
       setUploadError(null);
       try {
         const img = await loadImage(url);
-        if (cancelled) return;
-        const results = await upload.scanImage(img);
-        if (cancelled) return;
+        if (cancelled || gen !== uploadScanGenRef.current) return;
+        const results = await upload.scanImage(img, {
+          onProgress: (progress) => {
+            if (gen !== uploadScanGenRef.current) return;
+            setUploadBusyMessage(progress.message);
+          },
+        });
+        if (cancelled || gen !== uploadScanGenRef.current) return;
         applyUploadResults(img, results, upload.getLastLocalization());
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && gen === uploadScanGenRef.current) {
           setUploadError(err instanceof Error ? err.message : String(err));
         }
       } finally {
-        if (!cancelled) setUploadBusy(false);
+        if (!cancelled && gen === uploadScanGenRef.current) {
+          setUploadBusy(false);
+          setUploadBusyMessage("Localizing + decoding…");
+        }
       }
     })();
     return () => {
@@ -332,6 +346,7 @@ export function ScannerDemo() {
 
   const clearUploadLocalization = upload.clearResults;
   const clearUpload = useCallback(() => {
+    uploadScanGenRef.current += 1;
     setUploadPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
@@ -341,6 +356,7 @@ export function ScannerDemo() {
     setUploadLocalization(null);
     setUploadError(null);
     setUploadBusy(false);
+    setUploadBusyMessage("Localizing + decoding…");
     clearUploadLocalization();
   }, [clearUploadLocalization]);
 
@@ -377,11 +393,13 @@ export function ScannerDemo() {
   const onUploadFile = useCallback(
     async (file: File | null) => {
       if (!file) return;
+      const gen = ++uploadScanGenRef.current;
       setUploadError(null);
       setUploadResults([]);
       setUploadResultImage(null);
       setUploadLocalization(null);
       setUploadBusy(true);
+      setUploadBusyMessage("Loading image…");
 
       const url = URL.createObjectURL(file);
       setUploadPreview((prev) => {
@@ -391,13 +409,25 @@ export function ScannerDemo() {
 
       try {
         const img = await loadImage(url);
-        const results = await upload.scanImage(img);
+        if (gen !== uploadScanGenRef.current) return;
+        const results = await upload.scanImage(img, {
+          onProgress: (progress) => {
+            if (gen !== uploadScanGenRef.current) return;
+            setUploadBusyMessage(progress.message);
+          },
+        });
+        if (gen !== uploadScanGenRef.current) return;
         applyUploadResults(img, results, upload.getLastLocalization());
         if (results.length > 0 && beepRef.current) playBeep();
       } catch (err) {
-        setUploadError(err instanceof Error ? err.message : String(err));
+        if (gen === uploadScanGenRef.current) {
+          setUploadError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
-        setUploadBusy(false);
+        if (gen === uploadScanGenRef.current) {
+          setUploadBusy(false);
+          setUploadBusyMessage("Localizing + decoding…");
+        }
       }
     },
     [upload, applyUploadResults],
@@ -614,6 +644,7 @@ export function ScannerDemo() {
           setUploadOpen(false);
         }}
         busy={uploadBusy}
+        busyMessage={uploadBusyMessage}
         error={uploadError}
         previewUrl={uploadPreview}
         resultImageUrl={uploadResultImage}
