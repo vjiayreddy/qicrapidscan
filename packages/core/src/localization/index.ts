@@ -5,6 +5,7 @@ export {
   dedupeLocalizationRois,
   findContainingRoiIndex,
   paddedRoiRect,
+  exactRoiRect,
   pointInRoi,
 } from "./hybridHelpers.js";
 export {
@@ -30,6 +31,8 @@ export type { PharmaLocalizerClassName } from "./constants.js";
 export type {
   LocalizationRoi,
   ImageLocalization,
+  HybridScanProgress,
+  HybridScanProgressPhase,
   LocateInput,
   LocateResult,
   OnnxLocalizerInitOptions,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   dedupeLocalizationRois,
+  exactRoiRect,
   findContainingRoiIndex,
   paddedRoiRect,
   withRoiDecodeStatus,
@@ -24,6 +25,29 @@ describe("withRoiDecodeStatus", () => {
     );
     expect(roi.decoded).toBe(false);
     expect(roi.texts).toEqual([]);
+  });
+});
+
+describe("exactRoiRect", () => {
+  it("returns the YOLO box clamped to the frame with no padding", () => {
+    const rect = exactRoiRect(
+      { x: 40.7, y: 10.2, width: 20.4, height: 12.9 },
+      200,
+      200,
+    );
+    expect(rect).toEqual({ x: 40, y: 10, width: 20, height: 13 });
+  });
+
+  it("clamps overflow to the source bounds", () => {
+    const rect = exactRoiRect(
+      { x: 90, y: 90, width: 50, height: 50 },
+      100,
+      100,
+    );
+    expect(rect.x).toBe(90);
+    expect(rect.y).toBe(90);
+    expect(rect.width).toBe(10);
+    expect(rect.height).toBe(10);
   });
 });
 

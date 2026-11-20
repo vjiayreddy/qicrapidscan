@@ -1,5 +1,8 @@
 export { BarcodeScanner } from "./scanner/BarcodeScanner.js";
-export type { BarcodeScannerDependencies } from "./scanner/BarcodeScanner.js";
+export type {
+  BarcodeScannerDependencies,
+  ScanImageOptions,
+} from "./scanner/BarcodeScanner.js";
 export { BarcodeError } from "./errors/index.js";
 export type { BarcodeErrorCode } from "./errors/index.js";
 export {
@@ -36,6 +39,21 @@ export type {
   CropBarcodeOptions,
   CropRect,
 } from "./processing/cropBarcode.js";
+export {
+  tightenContentRectFromImageData,
+  mapLocalRectToSource,
+  symbolKindFromLabel,
+} from "./processing/tightenBarcodeCrop.js";
+export type {
+  ContentRect,
+  TightenBarcodeCropOptions,
+  TightenSymbolKind,
+} from "./processing/tightenBarcodeCrop.js";
+export { prepareBarcodeDecodeCanvas } from "./processing/prepareBarcodeDecodeCanvas.js";
+export type {
+  PrepareBarcodeDecodeOptions,
+  PreparedBarcodeDecode,
+} from "./processing/prepareBarcodeDecodeCanvas.js";
 export { annotateBarcodeImage } from "./processing/annotateBarcodeImage.js";
 export type {
   AnnotateSource,
@@ -110,6 +128,8 @@ export type {
   LocalizationOptions,
   LocalizationRoi,
   ImageLocalization,
+  HybridScanProgress,
+  HybridScanProgressPhase,
   OnnxBarcodeLocalizer,
   OnnxLocalizerInitOptions,
 } from "./types/index.js";
@@ -123,6 +143,7 @@ export {
   withRoiDecodeStatus,
   dedupeLocalizationRois,
   paddedRoiRect,
+  exactRoiRect,
   DEFAULT_INPUT_SIZE,
   DEFAULT_SCORE_THRESHOLD,
   DEFAULT_IOU_THRESHOLD,

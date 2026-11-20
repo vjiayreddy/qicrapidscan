@@ -7,6 +7,7 @@ import type { BarcodeFormat, BarcodeResult } from "../types/barcode.types.js";
 import { BarcodeError } from "../errors/BarcodeError.js";
 import { hybridImageScan } from "../localization/hybridImageScan.js";
 import type {
+  HybridScanProgress,
   ImageLocalization,
   LocalizationRoi,
   OnnxBarcodeLocalizer,
@@ -58,6 +59,7 @@ export interface HybridScanOptions {
   maxRois?: number;
   /** Staged opencv.js URL for the ROI cascade. */
   openCvScriptUrl?: string;
+  onProgress?: (progress: HybridScanProgress) => void;
 }
 
 function scaleRoisToSource(
@@ -129,6 +131,10 @@ export class ImageScanner {
     source: ImageSource,
     hybrid: HybridScanOptions,
   ): Promise<ImageScanOutcome> {
+    hybrid.onProgress?.({
+      phase: "preparing",
+      message: "Preparing image…",
+    });
     const sized = await this.toCanvas(source);
     try {
       const outcome = await hybridImageScan(this.decoder, sized.canvas, {
@@ -144,9 +150,23 @@ export class ImageScanner {
         opencvCascade: true,
         formats: this.options.formats,
         openCvScriptUrl: hybrid.openCvScriptUrl,
+        onProgress: hybrid.onProgress,
         fullFrameDecode: async () => {
-          const decoded = await this.decodeOnCanvas(sized.canvas);
-          return decoded.results;
+          // Cap tiling budget for miss fill-in so hybrid doesn't feel stuck.
+          const prev = this.options.multiLimits;
+          if (prev) {
+            this.options.multiLimits = {
+              ...prev,
+              maxTimeMs: Math.min(prev.maxTimeMs, 2500),
+              maxRegions: Math.min(prev.maxRegions, 16),
+            };
+          }
+          try {
+            const decoded = await this.decodeOnCanvas(sized.canvas);
+            return decoded.results;
+          } finally {
+            this.options.multiLimits = prev;
+          }
         },
       });
 

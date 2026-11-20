@@ -21,6 +21,7 @@ import { ImageScanner, type ImageSource } from "../processing/ImageScanner.js";
 import { drawVideoFrame } from "../processing/canvas.js";
 import { createOnnxLocalizer } from "../localization/localizer.js";
 import type {
+  HybridScanProgress,
   ImageLocalization,
   OnnxBarcodeLocalizer,
 } from "../localization/types.js";
@@ -28,6 +29,10 @@ import type { BarcodeResult } from "../types/barcode.types.js";
 import type { CameraDevice } from "../types/camera.types.js";
 import type { BarcodeScannerOptions } from "../types/scanner.types.js";
 import { resolveOptions, type ResolvedScannerOptions } from "./validateOptions.js";
+
+export interface ScanImageOptions {
+  onProgress?: (progress: HybridScanProgress) => void;
+}
 
 type ScannerEvents = {
   result: BarcodeResult[];
@@ -152,8 +157,20 @@ export class BarcodeScanner {
     this.frameProcessor.resume();
   }
 
-  async scanImage(source: ImageSource): Promise<BarcodeResult[]> {
+  async scanImage(
+    source: ImageSource,
+    options: ScanImageOptions = {},
+  ): Promise<BarcodeResult[]> {
     this.assertAlive();
+    const report = (progress: HybridScanProgress) => {
+      try {
+        options.onProgress?.(progress);
+      } catch {
+        // Progress must never break decode.
+      }
+    };
+
+    report({ phase: "preparing", message: "Starting scanner…" });
     await this.ensureRuntime();
 
     try {
@@ -162,6 +179,7 @@ export class BarcodeScanner {
 
       let results: BarcodeResult[];
       if (this.resolved.localization.enabled) {
+        report({ phase: "preparing", message: "Loading localizer…" });
         const ready = await this.ensureLocalizer();
         if (ready && this.localizer?.ready) {
           const outcome = await this.imageScanner!.scanHybrid(source, {
@@ -170,6 +188,7 @@ export class BarcodeScanner {
             maxRois: this.resolved.localization.maxRois,
             openCvScriptUrl:
               this.resolved.localization.openCvScriptUrl || undefined,
+            onProgress: options.onProgress,
           });
           this.lastImageLocalization = outcome.localization ?? null;
           results = outcome.results;
@@ -182,10 +201,15 @@ export class BarcodeScanner {
             fallbackReason:
               this.localizerInitError ?? "localizer_unavailable",
           };
+          report({
+            phase: "full_frame",
+            message: "Localizer unavailable — decode-only…",
+          });
           results = await this.imageScanner!.scan(source);
         }
       } else {
         this.lastImageLocalization = null;
+        report({ phase: "full_frame", message: "Decoding image…" });
         results = await this.imageScanner!.scan(source);
       }
 

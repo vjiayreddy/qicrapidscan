@@ -8,6 +8,8 @@ export type {
   LocalizationOptions,
   LocalizationRoi,
   ImageLocalization,
+  HybridScanProgress,
+  HybridScanProgressPhase,
   OnnxBarcodeLocalizer,
   OnnxLocalizerInitOptions,
 } from "../localization/types.js";

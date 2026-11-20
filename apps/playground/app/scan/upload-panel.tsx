@@ -15,9 +15,11 @@ import type {
   LocalizationRoi,
 } from "@qicrapidscan/core";
 import {
-  DEFAULT_ROI_PADDING,
-  localizerLabelUsesSquareCrop,
-  paddedRoiRect,
+  exactRoiRect,
+  mapLocalRectToSource,
+  symbolKindFromLabel,
+  tightenContentRectFromImageData,
+  type TightenSymbolKind,
 } from "@qicrapidscan/core";
 
 const FORMAT_LABELS: Partial<Record<BarcodeFormat, string>> = {
@@ -44,37 +46,112 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function thumbKindFromRoiOrFormat(
+  label: string | undefined,
+  format?: BarcodeFormat,
+): TightenSymbolKind {
+  if (label?.trim()) return symbolKindFromLabel(label);
+  if (format === "DATA_MATRIX" || format === "QR_CODE" || format === "AZTEC") {
+    return "matrix";
+  }
+  if (format === "PDF_417") return "pdf417";
+  return "linear";
+}
+
+type CropThumb = {
+  dataUrl: string;
+  width: number;
+  height: number;
+  kind: TightenSymbolKind;
+};
+
+/** Fit crop pixels into a thumb slot while keeping the real aspect ratio. */
+function fitThumbBox(
+  width: number,
+  height: number,
+  kind: TightenSymbolKind,
+): { width: number; height: number } {
+  const maxW = kind === "matrix" ? 56 : kind === "pdf417" ? 100 : 112;
+  const maxH = kind === "matrix" ? 56 : kind === "pdf417" ? 52 : 44;
+  if (width <= 0 || height <= 0) return { width: maxW, height: maxH };
+  const scale = Math.min(maxW / width, maxH / height);
+  return {
+    width: Math.max(24, Math.round(width * scale)),
+    height: Math.max(16, Math.round(height * scale)),
+  };
+}
+
 /**
- * Crop the same padded rect the decoder used (`roi.crop`), falling back to
- * recomputing pad when crop metadata is missing.
- * Linear labels keep aspect (not forced square) so Code128 thumbs aren't
- * crushed into a gray strip.
+ * YOLO-box crop tightened per barcode type (linear / matrix / PDF417).
+ * Falls back to the exact localization box when ink cannot be estimated.
+ * Returns pixel size so the list thumb can size itself dynamically.
  */
-function cropRoiToDataUrl(
+function cropRoiToThumb(
   image: HTMLImageElement,
   roi: LocalizationRoi,
-  options: { maxEdge?: number; padRatio?: number } = {},
-): string | null {
+  options: { maxEdge?: number } = {},
+): CropThumb | null {
   const iw = image.naturalWidth || image.width;
   const ih = image.naturalHeight || image.height;
   if (!iw || !ih || roi.width <= 0 || roi.height <= 0) return null;
 
-  const padRatio = options.padRatio ?? DEFAULT_ROI_PADDING;
-  const square = localizerLabelUsesSquareCrop(roi.label);
-  const rect =
+  const kind = symbolKindFromLabel(roi.label);
+  const base =
     roi.crop && roi.crop.width >= 2 && roi.crop.height >= 2
       ? roi.crop
-      : paddedRoiRect(roi, iw, ih, padRatio, { square, minPadPx: 4 });
-  const { x, y, width, height } = rect;
-  if (width < 2 || height < 2) return null;
+      : exactRoiRect(roi, iw, ih);
 
-  // Clamp to image bounds in case scaled crop metadata drifted.
-  const sx = Math.max(0, Math.min(Math.floor(x), iw - 1));
-  const sy = Math.max(0, Math.min(Math.floor(y), ih - 1));
-  const sw = Math.max(1, Math.min(Math.round(width), iw - sx));
-  const sh = Math.max(1, Math.min(Math.round(height), ih - sy));
+  let sx = Math.max(0, Math.min(Math.floor(base.x), iw - 1));
+  let sy = Math.max(0, Math.min(Math.floor(base.y), ih - 1));
+  let sw = Math.max(1, Math.min(Math.round(base.width), iw - sx));
+  let sh = Math.max(1, Math.min(Math.round(base.height), ih - sy));
+  if (sw < 2 || sh < 2) return null;
 
-  const maxEdge = options.maxEdge ?? 192;
+  // Analyze at native ROI resolution (capped) so projections stay sharp.
+  const analyzeMax = 640;
+  const analyzeScale = Math.min(1, analyzeMax / Math.max(sw, sh));
+  const aw = Math.max(1, Math.round(sw * analyzeScale));
+  const ah = Math.max(1, Math.round(sh * analyzeScale));
+  const analyze = document.createElement("canvas");
+  analyze.width = aw;
+  analyze.height = ah;
+  const analyzeCtx = analyze.getContext("2d", { willReadFrequently: true });
+  if (analyzeCtx) {
+    analyzeCtx.imageSmoothingEnabled = analyzeScale < 0.999;
+    analyzeCtx.drawImage(image, sx, sy, sw, sh, 0, 0, aw, ah);
+    try {
+      const local = tightenContentRectFromImageData(
+        analyzeCtx.getImageData(0, 0, aw, ah),
+        { marginPx: 2, symbolKind: kind },
+      );
+      if (local) {
+        const inv = analyzeScale > 0 ? 1 / analyzeScale : 1;
+        const tightLocal = {
+          x: Math.round(local.x * inv),
+          y: Math.round(local.y * inv),
+          width: Math.max(1, Math.round(local.width * inv)),
+          height: Math.max(1, Math.round(local.height * inv)),
+        };
+        const tight = mapLocalRectToSource(tightLocal, {
+          x: sx,
+          y: sy,
+          width: sw,
+          height: sh,
+        });
+        sx = Math.max(0, Math.min(tight.x, iw - 1));
+        sy = Math.max(0, Math.min(tight.y, ih - 1));
+        sw = Math.max(1, Math.min(tight.width, iw - sx));
+        sh = Math.max(1, Math.min(tight.height, ih - sy));
+      }
+    } catch {
+      // Keep the YOLO box when canvas/pixel access fails.
+    }
+  }
+  analyze.width = 0;
+  analyze.height = 0;
+
+  // Preserve real crop aspect — UI sizes the thumb from these pixels.
+  const maxEdge = options.maxEdge ?? (kind === "matrix" ? 160 : 280);
   const scale = Math.min(1, maxEdge / Math.max(sw, sh));
   const outW = Math.max(1, Math.round(sw * scale));
   const outH = Math.max(1, Math.round(sh * scale));
@@ -84,20 +161,31 @@ function cropRoiToDataUrl(
   canvas.height = outH;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  // White stage so quiet-zone / pad margin is obvious in the thumb.
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, outW, outH);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(image, sx, sy, sw, sh, 0, 0, outW, outH);
   try {
-    return canvas.toDataURL("image/jpeg", 0.92);
+    return {
+      dataUrl: canvas.toDataURL("image/jpeg", 0.92),
+      width: outW,
+      height: outH,
+      kind,
+    };
   } catch {
     return null;
   } finally {
     canvas.width = 0;
     canvas.height = 0;
   }
+}
+
+function findRoiForResult(
+  result: BarcodeResult,
+  rois: LocalizationRoi[],
+): LocalizationRoi | null {
+  const text = result.text?.trim();
+  if (!text) return null;
+  return rois.find((roi) => roi.texts?.includes(text)) ?? null;
 }
 
 function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
@@ -130,10 +218,28 @@ function containRect(
   };
 }
 
+/** Prefer native camera app for still capture on phones / tablets. */
+function prefersNativeStillCapture(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+  const ua = navigator.userAgent || "";
+  const uaMobile =
+    /Android|iPhone|iPod|Mobile/i.test(ua) ||
+    (/iPad/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  const coarse =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches;
+  const touch = navigator.maxTouchPoints > 1;
+  return uaMobile || (coarse && touch);
+}
+
 type UploadPanelProps = {
   open: boolean;
   onClose: () => void;
   busy: boolean;
+  /** Staged hybrid progress text while busy. */
+  busyMessage?: string | null;
   error: string | null;
   previewUrl: string | null;
   /** Annotated result image (source + baked orange landmarks). Preferred when set. */
@@ -155,6 +261,7 @@ export function UploadPanel(props: UploadPanelProps) {
     open,
     onClose,
     busy,
+    busyMessage = "Localizing + decoding…",
     error,
     previewUrl,
     resultImageUrl = null,
@@ -173,9 +280,11 @@ export function UploadPanel(props: UploadPanelProps) {
     ? previewUrl
     : resultImageUrl || previewUrl;
 
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [nativeCapture, setNativeCapture] = useState(false);
   const [natural, setNatural] = useState({ width: 0, height: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
@@ -201,8 +310,12 @@ export function UploadPanel(props: UploadPanelProps) {
   const resultsBadge =
     results.length + (hasLocalization ? failedRois.length : 0);
 
-  const pickFile = useCallback(() => {
-    inputRef.current?.click();
+  const pickGallery = useCallback(() => {
+    galleryInputRef.current?.click();
+  }, []);
+
+  const pickCamera = useCallback(() => {
+    cameraInputRef.current?.click();
   }, []);
 
   const onDrop = useCallback(
@@ -214,6 +327,10 @@ export function UploadPanel(props: UploadPanelProps) {
     },
     [onFile],
   );
+
+  useEffect(() => {
+    setNativeCapture(prefersNativeStillCapture());
+  }, []);
 
   useEffect(() => {
     setZoom(1);
@@ -387,10 +504,21 @@ export function UploadPanel(props: UploadPanelProps) {
         className={`pg-upload-panel__body${previewUrl ? " pg-upload-panel__body--viewer" : ""}`}
       >
         <input
-          ref={inputRef}
+          ref={galleryInputRef}
           className="pg-upload-panel__file"
           type="file"
           accept="image/*"
+          onChange={(event) => {
+            onFile(event.target.files?.[0] ?? null);
+            event.target.value = "";
+          }}
+        />
+        <input
+          ref={cameraInputRef}
+          className="pg-upload-panel__file"
+          type="file"
+          accept="image/*"
+          capture="environment"
           onChange={(event) => {
             onFile(event.target.files?.[0] ?? null);
             event.target.value = "";
@@ -415,20 +543,34 @@ export function UploadPanel(props: UploadPanelProps) {
             onDrop={onDrop}
           >
             <span className="pg-upload-drop__icon" aria-hidden>
-              <ImageIcon />
+              {nativeCapture ? <CameraIcon /> : <ImageIcon />}
             </span>
-            <h3 className="pg-upload-drop__title">Drop an image here</h3>
+            <h3 className="pg-upload-drop__title">
+              {nativeCapture ? "Capture or choose an image" : "Drop an image here"}
+            </h3>
             <p className="pg-upload-drop__hint">
-              PNG, JPG, or WebP with one or more barcodes. Use Settings to
-              choose 1D / 2D formats.
+              {nativeCapture
+                ? "On phones and tablets, Take photo opens the native camera. Gallery and Settings still work for 1D / 2D formats."
+                : "PNG, JPG, or WebP with one or more barcodes. Use Settings to choose 1D / 2D formats. Live camera stays on the 1D / 2D modes."}
             </p>
-            <button
-              type="button"
-              className="pg-btn pg-btn--primary pg-btn--lg"
-              onClick={pickFile}
-            >
-              Choose image
-            </button>
+            <div className="pg-upload-drop__actions">
+              {nativeCapture ? (
+                <button
+                  type="button"
+                  className="pg-btn pg-btn--primary pg-btn--lg"
+                  onClick={pickCamera}
+                >
+                  Take photo
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={`pg-btn pg-btn--lg ${nativeCapture ? "pg-btn--secondary" : "pg-btn--primary"}`}
+                onClick={pickGallery}
+              >
+                {nativeCapture ? "Choose from gallery" : "Choose image"}
+              </button>
+            </div>
           </div>
         ) : (
           <div className="pg-upload-viewer">
@@ -552,8 +694,8 @@ export function UploadPanel(props: UploadPanelProps) {
               </div>
 
               {busy ? (
-                <div className="pg-upload-result__busy">
-                  <strong>Localizing + decoding…</strong>
+                <div className="pg-upload-result__busy" role="status">
+                  <strong>{busyMessage || "Localizing + decoding…"}</strong>
                 </div>
               ) : null}
 
@@ -602,10 +744,21 @@ export function UploadPanel(props: UploadPanelProps) {
             </div>
 
             <div className="pg-upload-viewer__footer">
+              {nativeCapture ? (
+                <button
+                  type="button"
+                  className="pg-btn pg-btn--primary"
+                  onClick={pickCamera}
+                  disabled={busy}
+                >
+                  Retake photo
+                </button>
+              ) : null}
               <button
                 type="button"
-                className="pg-btn pg-btn--primary"
-                onClick={pickFile}
+                className={`pg-btn ${nativeCapture ? "pg-btn--secondary" : "pg-btn--primary"}`}
+                onClick={pickGallery}
+                disabled={busy}
               >
                 Choose another
               </button>
@@ -630,6 +783,7 @@ export function UploadPanel(props: UploadPanelProps) {
       {resultsOpen ? (
         <UploadResultsDrawer
           results={results}
+          decodedRois={decodedRois}
           failedRois={failedRois}
           previewUrl={previewUrl}
           decodedCount={
@@ -644,6 +798,7 @@ export function UploadPanel(props: UploadPanelProps) {
 
 type UploadResultsDrawerProps = {
   results: BarcodeResult[];
+  decodedRois: LocalizationRoi[];
   failedRois: LocalizationRoi[];
   previewUrl: string | null;
   decodedCount: number;
@@ -652,45 +807,47 @@ type UploadResultsDrawerProps = {
 
 function UploadResultsDrawer({
   results,
+  decodedRois,
   failedRois,
   previewUrl,
   decodedCount,
   onClose,
 }: UploadResultsDrawerProps) {
-  const [failedCrops, setFailedCrops] = useState<Record<string, string>>({});
+  const [originalCrops, setOriginalCrops] = useState<Record<string, CropThumb>>(
+    {},
+  );
 
   useEffect(() => {
     let cancelled = false;
-    setFailedCrops({});
-    if (!previewUrl || failedRois.length === 0) return;
+    setOriginalCrops({});
+    if (!previewUrl) return;
+    if (decodedRois.length === 0 && failedRois.length === 0) return;
 
     void (async () => {
       try {
         const image = await loadImageFromUrl(previewUrl);
         if (cancelled) return;
-        const next: Record<string, string> = {};
+        const next: Record<string, CropThumb> = {};
         failedRois.forEach((roi, index) => {
           const key = `fail-${index}-${roi.x}-${roi.y}`;
-          // Prefer the raw YOLO crop (or recomputed pad). Cascade-miss
-          // previews are often washed-out gray and hide the barcode.
-          const dataUrl =
-            roi.previewDataUrl ??
-            cropRoiToDataUrl(image, roi, {
-              padRatio: DEFAULT_ROI_PADDING,
-              maxEdge: 256,
-            });
-          if (dataUrl) next[key] = dataUrl;
+          const thumb = cropRoiToThumb(image, roi, { maxEdge: 256 });
+          if (thumb) next[key] = thumb;
         });
-        if (!cancelled) setFailedCrops(next);
+        decodedRois.forEach((roi, index) => {
+          const key = `ok-${index}-${roi.x}-${roi.y}`;
+          const thumb = cropRoiToThumb(image, roi, { maxEdge: 256 });
+          if (thumb) next[key] = thumb;
+        });
+        if (!cancelled) setOriginalCrops(next);
       } catch {
-        if (!cancelled) setFailedCrops({});
+        if (!cancelled) setOriginalCrops({});
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [previewUrl, failedRois]);
+  }, [previewUrl, decodedRois, failedRois]);
 
   return (
     <div className="pg-upload-results-drawer" role="dialog" aria-modal="true">
@@ -727,34 +884,56 @@ function UploadResultsDrawer({
               </p>
             ) : (
               <ul className="pg-upload-result__list">
-                {results.map((item, index) => (
-                  <li
-                    key={`${item.id}-${item.timestamp}-${index}`}
-                    className="pg-upload-result__item"
-                  >
-                    <div className="pg-upload-result__thumb" aria-hidden>
-                      {item.cropDataUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={item.cropDataUrl} alt="" />
-                      ) : (
-                        <span className="pg-upload-result__thumb-fallback">
-                          {index + 1}
+                {results.map((item, index) => {
+                  const matchedRoi = findRoiForResult(item, decodedRois);
+                  const matchedIndex = matchedRoi
+                    ? decodedRois.indexOf(matchedRoi)
+                    : -1;
+                  const crop =
+                    matchedIndex >= 0 && matchedRoi
+                      ? originalCrops[
+                          `ok-${matchedIndex}-${matchedRoi.x}-${matchedRoi.y}`
+                        ]
+                      : undefined;
+                  const kind =
+                    crop?.kind ??
+                    thumbKindFromRoiOrFormat(matchedRoi?.label, item.format);
+                  const box = crop
+                    ? fitThumbBox(crop.width, crop.height, kind)
+                    : fitThumbBox(52, 52, kind);
+                  return (
+                    <li
+                      key={`${item.id}-${item.timestamp}-${index}`}
+                      className="pg-upload-result__item"
+                    >
+                      <div
+                        className="pg-upload-result__thumb"
+                        style={{ width: box.width, height: box.height }}
+                        aria-hidden
+                      >
+                        {crop ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={crop.dataUrl} alt="" />
+                        ) : (
+                          <span className="pg-upload-result__thumb-fallback">
+                            {index + 1}
+                          </span>
+                        )}
+                      </div>
+                      <div className="pg-upload-result__body">
+                        <span className="pg-upload-result__format">
+                          {FORMAT_LABELS[item.format] ?? item.format}
+                          <span className="pg-upload-result__index">
+                            #{index + 1}
+                          </span>
                         </span>
-                      )}
-                    </div>
-                    <div className="pg-upload-result__body">
-                      <span className="pg-upload-result__format">
-                        {FORMAT_LABELS[item.format] ?? item.format}
-                        <span className="pg-upload-result__index">
-                          #{index + 1}
+                        <span className="pg-upload-result__text">
+                          {item.text}
                         </span>
-                      </span>
-                      <span className="pg-upload-result__text">
-                        {item.text}
-                      </span>
-                    </div>
-                  </li>
-                ))}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -771,7 +950,12 @@ function UploadResultsDrawer({
               <ul className="pg-upload-result__list">
                 {failedRois.map((roi, index) => {
                   const key = `fail-${index}-${roi.x}-${roi.y}`;
-                  const cropUrl = failedCrops[key];
+                  const crop = originalCrops[key];
+                  const kind =
+                    crop?.kind ?? thumbKindFromRoiOrFormat(roi.label);
+                  const box = crop
+                    ? fitThumbBox(crop.width, crop.height, kind)
+                    : fitThumbBox(72, 40, kind);
                   return (
                     <li
                       key={key}
@@ -779,11 +963,12 @@ function UploadResultsDrawer({
                     >
                       <div
                         className="pg-upload-result__thumb pg-upload-result__thumb--fail"
+                        style={{ width: box.width, height: box.height }}
                         aria-hidden
                       >
-                        {cropUrl ? (
+                        {crop ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={cropUrl} alt="" />
+                          <img src={crop.dataUrl} alt="" />
                         ) : (
                           <FailMarkIcon />
                         )}
@@ -850,6 +1035,20 @@ function ImageIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M9 5h6l1.5 2H20a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h3.5L9 5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13" r="3.25" stroke="currentColor" strokeWidth="1.6" />
     </svg>
   );
 }
